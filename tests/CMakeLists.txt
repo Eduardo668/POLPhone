@@ -1,9 +1,17 @@
 add_executable(polphone_tests
     test_main.cpp
+    test_redactor.cpp
     test_strings.cpp
 )
 
-target_link_libraries(polphone_tests PRIVATE doctest polphone_util polphone_warnings)
+target_link_libraries(polphone_tests PRIVATE
+    doctest
+    polphone_util
+    polphone_logging
+    polphone_pjsip_logging
+    PJSIP::pjsua2
+    polphone_warnings
+)
 target_compile_definitions(polphone_tests PRIVATE
     WIN32_LEAN_AND_MEAN
     NOMINMAX

@@ -28,6 +28,9 @@
 | [ADR-018](#adr-018--escopo-funcional-fechado) | Escopo funcional fechado | Aceito |
 | [ADR-019](#adr-019--descoberta-das-bibliotecas-do-pjproject-nos-diretórios-de-saída-reais) | Descoberta das bibliotecas do pjproject nos diretórios de saída reais | Aceito |
 | [ADR-020](#adr-020--wmme-no-windows-desktop-e-build-limitado-às-bibliotecas-consumidas) | WMME no Windows Desktop e build limitado às bibliotecas consumidas | Aceito |
+| [ADR-021](#adr-021--propriedade-do-pjlogwriter-transferida-ao-endpoint-na-tag-217) | Propriedade do `PjLogWriter` transferida ao Endpoint na tag 2.17 | Aceito |
+| [ADR-022](#adr-022--consolelevel-do-pjsip-deve-permitir-o-callback-customizado) | `consoleLevel` do PJSIP deve permitir o callback customizado | Aceito |
+| [ADR-023](#adr-023--normalização-utf-8-dos-logs-do-backend-wmme) | Normalização UTF-8 dos logs do backend WMME | Aceito |
 
 ---
 
@@ -905,3 +908,122 @@
   2. **Manter o alvo padrão da solução e ignorar seu exit code** — rejeitada: violaria a regra de não
      presumir sucesso e permitiria falhas reais nas bibliotecas passarem despercebidas.
   3. **Migrar o build do pjproject para CMake** — rejeitada: suporte experimental e fora da estratégia.
+
+---
+
+## ADR-021 — Propriedade do `PjLogWriter` transferida ao Endpoint na tag 2.17
+
+- **Status:** Aceito — 2026-07-31
+
+- **Contexto:**
+  A arquitetura inicial afirmava que o PJSUA2 não assumia a propriedade de
+  `EpConfig::logConfig.writer` e que a aplicação deveria destruir o writer depois do endpoint. A
+  inspeção obrigatória da tag 2.17 mostrou o contrário. Em `pjsua2/endpoint.hpp`, o comentário de
+  `LogConfig::writer` declara que a instância será destruída pelo endpoint; em
+  `pjsua2/endpoint.cpp`, `Endpoint::libInit()` guarda o ponteiro e `Endpoint::libDestroy()` executa
+  `delete this->writer` depois de `pjsua_destroy2()`.
+
+- **Decisão:**
+  O `Logger` permanece propriedade da aplicação, é criado antes do endpoint e destruído depois dele.
+  O `PjLogWriter` é alocado dinamicamente e o ponteiro é atribuído a `EpConfig::logConfig.writer`,
+  transferindo sua propriedade ao `Endpoint` da tag 2.17. A aplicação não mantém `unique_ptr`, não
+  usa objeto de pilha e não executa `delete` nesse writer. `libDestroy()` encerra o PJSUA2, entrega
+  os últimos logs e destrói o writer enquanto o `Logger` referenciado ainda está vivo.
+
+- **Motivos:**
+  - Segue a assinatura, a documentação e a implementação reais da versão fixada;
+  - Evita `delete` sobre objeto de pilha e dupla liberação;
+  - Mantém o logger disponível para todos os logs emitidos durante `pjsua_destroy2()`;
+  - Não requer nenhuma alteração no pjproject.
+
+- **Consequências:**
+  - *Positivas:* ciclo de vida compatível com o PJSUA2 2.17 e destruição determinística;
+  - *Negativas:* a transferência é expressa por ponteiro bruto e não pelo sistema de tipos; uma
+    futura atualização do PJSIP exige reconfirmar a política de propriedade;
+  - *Ação decorrente:* comentários no bootstrap e testes de integração devem registrar a ordem
+    `Logger → Endpoint/libCreate → new PjLogWriter/libInit → libStart → libDestroy/delete writer →
+    destruição do Logger`.
+
+- **Alternativas consideradas:**
+  1. **Writer na pilha** — rejeitada: `libDestroy()` tentaria executar `delete` sobre memória não
+     alocada com `new`.
+  2. **`unique_ptr` mantido pela aplicação** — rejeitada: causaria dupla destruição após
+     `Endpoint::libDestroy()`.
+  3. **Modificar o PJSUA2 para não destruir o writer** — rejeitada: violaria a regra de não alterar o
+     submodule e criaria comportamento divergente do upstream.
+
+---
+
+## ADR-022 — `consoleLevel` do PJSIP deve permitir o callback customizado
+
+- **Status:** Aceito — 2026-07-31
+
+- **Contexto:**
+  O ADR-014 previa `EpConfig::logConfig.consoleLevel = 0` para desligar o console nativo e encaminhar
+  todo log ao writer próprio. A execução de T05 mostrou que nenhum log posterior a `libInit()` chegava
+  ao callback. A inspeção de `pjsip/src/pjsua-lib/pjsua_core.c` na tag 2.17 confirmou que a função
+  interna `log_writer()` só chama `log_cfg.cb` dentro da condição
+  `level <= log_cfg.console_level`. Quando o callback existe, ele substitui `pj_log_write()` nesse
+  ramo; portanto o campo não representa apenas a saída nativa, mas também o teto do callback.
+
+- **Decisão:**
+  Com `PjLogWriter` instalado, configurar `logConfig.consoleLevel` com o teto técnico que deve chegar
+  ao adaptador, normalmente 5, igual ao nível do arquivo. O `Logger` aplica depois os limites
+  independentes de console e arquivo. Não configurar `logConfig.filename`, para impedir escrita do
+  PJSIP fora do caminho de redaction.
+
+- **Motivos:**
+  - Garante que níveis 1–5 efetivamente atravessem o redactor;
+  - Não duplica a saída: com callback configurado, a implementação chama o callback em vez do writer
+    nativo;
+  - Mantém verbosidades distintas nos sinks sob controle do POLPhone;
+  - Segue a implementação real da tag fixada sem modificar o submodule.
+
+- **Consequências:**
+  - *Positivas:* trace técnico do PJSIP chega sanitizado ao arquivo e ao console conforme os filtros;
+  - *Negativas:* o nome `consoleLevel` é enganoso nesse uso e deve ser reconfirmado em atualização de
+    versão;
+  - *Ação decorrente:* o `--selftest` verifica que uma linha PJSIP posterior a `libInit()` aparece no
+    arquivo formatado pelo POLPhone.
+
+- **Alternativas consideradas:**
+  1. **Manter `consoleLevel = 0`** — rejeitada: desativa o próprio callback na tag 2.17.
+  2. **Usar `logConfig.filename` do PJSIP** — rejeitada: grava sem redaction.
+  3. **Reconfigurar diretamente a API C de logging** — rejeitada: desnecessário e aumentaria o
+     acoplamento fora do adaptador.
+
+---
+
+## ADR-023 — Normalização UTF-8 dos logs do backend WMME
+
+- **Status:** Aceito — 2026-07-31
+
+- **Contexto:**
+  A arquitetura pressupunha que toda `pj::LogEntry::msg` chegaria em UTF-8. A validação real de T05
+  mostrou nomes de dispositivos WMME contendo bytes da code page ANSI do Windows (por exemplo,
+  `í` como `0xED`), enquanto mensagens próprias e demais linhas do PJSIP já estavam em UTF-8. Sem
+  normalização, console e arquivo recebiam uma mistura de codificações.
+
+- **Decisão:**
+  O `PjLogWriter` valida primeiro se a mensagem já é UTF-8. Texto válido é preservado; texto inválido
+  é convertido de `CP_ACP` para UTF-16 e então para UTF-8 com as APIs do Windows, antes da normalização
+  de linhas, redaction e envio ao `Logger`. Se a conversão falhar, bytes não ASCII são substituídos por
+  `?`, mantendo o log válido e evitando exceções na fronteira do callback.
+
+- **Motivos:**
+  - Mantém os sinks e arquivos em uma única codificação;
+  - Preserva mensagens SIP que já estejam em UTF-8;
+  - Corrige a origem da mistura sem espalhar dependência de API Windows pelo logger genérico;
+  - Mantém a conversão no único adaptador que inclui PJSUA2.
+
+- **Consequências:**
+  - *Positivas:* nomes acentuados do WMME ficam legíveis no console e no arquivo;
+  - *Negativas:* uma sequência binária inválida é tratada como texto da code page ativa e pode perder
+    caracteres no fallback; logs são texto e não devem transportar dados binários;
+  - *Ação decorrente:* manter teste com entrada Windows-1252 e teste de preservação de UTF-8 válido.
+
+- **Alternativas consideradas:**
+  1. **Assumir UTF-8 incondicionalmente** — rejeitada: produziu arquivo de codificação mista.
+  2. **Converter toda mensagem de `CP_ACP`** — rejeitada: corromperia mensagens que já chegam em UTF-8.
+  3. **Converter dentro de cada sink** — rejeitada: duplicaria a regra e permitiria que sinks futuros
+     recebessem texto inválido.

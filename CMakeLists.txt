@@ -46,6 +46,41 @@ target_compile_options(polphone_util PRIVATE
     $<$<CONFIG:Release>:/O2;/Zi>
 )
 
+add_library(polphone_logging STATIC
+    src/logging/Logger.cpp
+    src/logging/Redactor.cpp
+)
+target_include_directories(polphone_logging PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_link_libraries(polphone_logging PUBLIC polphone_util PRIVATE polphone_warnings)
+target_compile_options(polphone_logging PRIVATE
+    $<$<CONFIG:Debug>:/Zi;/Od;/RTC1>
+    $<$<CONFIG:Release>:/O2;/Zi>
+)
+
+# Isola pjsua2.hpp no adaptador; Logger, Redactor e sinks permanecem puros.
+add_library(polphone_pjsip_logging STATIC
+    src/logging/PjLogWriter.cpp
+)
+target_include_directories(polphone_pjsip_logging PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_compile_definitions(polphone_pjsip_logging PRIVATE
+    WIN32_LEAN_AND_MEAN
+    NOMINMAX
+    _CRT_SECURE_NO_WARNINGS
+    _WINSOCK_DEPRECATED_NO_WARNINGS
+    UNICODE
+    _UNICODE
+    PJ_WIN32=1
+    PJ_M_X86_64=1
+)
+target_link_libraries(polphone_pjsip_logging
+    PUBLIC polphone_logging
+    PRIVATE PJSIP::pjsua2 polphone_warnings
+)
+target_compile_options(polphone_pjsip_logging PRIVATE
+    $<$<CONFIG:Debug>:/Zi;/Od;/RTC1>
+    $<$<CONFIG:Release>:/O2;/Zi>
+)
+
 add_executable(polphone src/main.cpp)
 target_compile_definitions(polphone PRIVATE
     WIN32_LEAN_AND_MEAN
@@ -57,7 +92,14 @@ target_compile_definitions(polphone PRIVATE
     PJ_WIN32=1
     PJ_M_X86_64=1
 )
-target_link_libraries(polphone PRIVATE PJSIP::pjsua2 nlohmann_json polphone_util polphone_warnings)
+target_link_libraries(polphone PRIVATE
+    PJSIP::pjsua2
+    nlohmann_json
+    polphone_util
+    polphone_logging
+    polphone_pjsip_logging
+    polphone_warnings
+)
 target_compile_options(polphone PRIVATE
     $<$<CONFIG:Debug>:/Zi;/Od;/RTC1>
     $<$<CONFIG:Release>:/O2;/Zi>

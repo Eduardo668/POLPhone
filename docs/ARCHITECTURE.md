@@ -231,10 +231,11 @@ Separar *parse* de *validação* permite testar as duas coisas sem arquivo em di
 `PjLogWriter : public pj::LogWriter` — implementa `void write(const pj::LogEntry &entry)`,
 aplica `Redactor` e delega ao `Logger`. Instalado em `EpConfig.logConfig.writer`.
 
-> **Regra de tempo de vida:** o `PjLogWriter` precisa existir de `libInit()` até **depois** de
-> `libDestroy()`, porque o PJSIP emite log durante a destruição. PJSUA2 **não** assume a posse do
-> ponteiro. Portanto o `Logger`/`PjLogWriter` é o primeiro objeto criado e o último destruído
-> em `Application`.
+> **Regra de tempo de vida (tag 2.17):** o `Logger` é criado antes do endpoint e destruído depois
+> dele. O `PjLogWriter` é alocado dinamicamente e sua propriedade é transferida ao PJSUA2 em
+> `libInit()` por `EpConfig.logConfig.writer`; `Endpoint::libDestroy()` emite os últimos logs e então
+> executa `delete` no writer. A aplicação não pode usar um writer de pilha nem destruí-lo novamente.
+> Ver ADR-021.
 
 ---
 
@@ -442,8 +443,9 @@ ouvir áudio antes do `CONFIRMED`, mas o MVP **só habilita envio de DTMF em `CO
 ### 4.5 Tempo de vida cruzado
 
 ```
-Logger/PjLogWriter  ├────────────────────────────────────────────────────────────┤
+Logger             ├────────────────────────────────────────────────────────────┤
 Endpoint                ├────────────────────────────────────────────────────┤
+PjLogWriter                       ├───────────────────────────────────────────┤
 Transport UDP               ├────────────────────────────────────────────┤
 Account                         ├────────────────────────────────────┤
 Call                                  ├──────────────┤   ├────────┤
@@ -471,8 +473,9 @@ Invariante: nenhuma barra interna pode ultrapassar as bordas da barra que a cont
        uaConfig.maxCalls    = 4
        uaConfig.userAgent   = "POLPhone/0.1 (PJSIP 2.17)"
        logConfig.level      = cfg.logging.fileLevel
-       logConfig.consoleLevel = 0        (console do PJSIP desligado; usamos nosso writer)
-       logConfig.writer     = &pjLogWriter
+       logConfig.consoleLevel = cfg.logging.fileLevel
+                                      (na tag 2.17 este campo limita também o callback; ADR-022)
+       logConfig.writer     = new PjLogWriter(logger)  (posse transferida ao Endpoint; ADR-021)
        logConfig.msgLogging = true       (SIP trace no arquivo)
        medConfig.clockRate  = cfg.audio.clockRate
        medConfig.noVad      = true       (crítico p/ in-band)
@@ -514,7 +517,7 @@ enquanto (não encerrando):
  6. callRegistry.reap()                          (esvazia graveyard)
  7. account.reset()                              destrói SipAccount
  8. ToneGenerator.reset()                        libera pool/porta da bridge
- 9. SipEndpoint::destroy()                       [libDestroy]
+ 9. SipEndpoint::destroy()                       [libDestroy; destrói também PjLogWriter]
 10. Logger::flush() e fecha arquivo
 11. return código de saída
 ```
@@ -717,8 +720,9 @@ Estados de mídia a tratar explicitamente (todos devem gerar log):
   `PJMEDIA_AUDIO_DEV_HAS_WASAPI=0` (ADR-020). WMME permanece habilitado e é usado por previsibilidade.
 - `enumDev2()` devolve nome + contagem de canais de entrada/saída. Um dispositivo é de captura se
   `inputCount > 0`, de reprodução se `outputCount > 0`.
-- Nomes vêm em UTF-8 do PJSIP; o console precisa de `CP_UTF8` (feito no `main`) — caso contrário
-  aparecem acentos corrompidos, o sintoma mais comum de "lista de dispositivos quebrada".
+- A maior parte dos textos do PJSIP vem em UTF-8, mas o backend WMME pode inserir nomes na code page
+  ANSI do Windows. O `PjLogWriter` preserva UTF-8 válido e converte essas entradas nativas para UTF-8
+  antes de redaction e escrita (ADR-023). O console usa `CP_UTF8` (feito no `main`).
 - Nomes do WMME são **truncados em 31 caracteres** — a busca por nome deve ser por *substring*
   e tolerante a truncamento.
 - `setCaptureDev/setPlaybackDev` são aplicados no MVP **somente fora de chamada**.
@@ -829,13 +833,19 @@ emite um `WARN` no início da sessão quando essa opção está ativa:
 
 1. **Thread-safe**: `write()` é chamado de T0, T1 e das threads de áudio; mutex interno.
 2. **Não reentrante em PJSIP**: o `LogWriter` jamais chama API do PJSUA2 (risco de deadlock).
-3. **Sobrevive ao `libDestroy()`**: o writer é destruído depois do endpoint (ARCHITECTURE §4.5).
+3. **Vive até o fim de `libDestroy()`**: o endpoint da tag 2.17 destrói o writer depois de emitir
+   seus últimos logs; o `Logger` referenciado continua vivo (ARCHITECTURE §4.5, ADR-021).
 4. **Rotação simples**: um arquivo por dia + limite de tamanho (ex.: 50 MB) com renomeação
    `.1`, `.2`; sem biblioteca externa.
 5. **`flush` imediato** para níveis ≤ 2 (fatal/erro), *buffered* para os demais — para que um crash
    não perca a última linha relevante.
 6. **Correlação**: todo envio de DTMF e toda chamada carregam um id (`dtmf-000N`, `call-000N`) que
    aparece em todas as linhas relacionadas, permitindo casar log ↔ captura Wireshark.
+
+Na tag 2.17, `pjsua_logging_config.console_level` também limita a chamada ao callback customizado.
+Com `logConfig.writer` instalado, deve receber o mesmo teto técnico do arquivo (normalmente 5); o
+callback substitui a escrita nativa nesse ramo, e o `Logger` aplica separadamente o nível de cada sink.
+Definir zero silenciaria o próprio `PjLogWriter`. Ver ADR-022.
 
 ### 10.5 O que nunca vai para o log
 
