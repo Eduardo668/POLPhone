@@ -1,0 +1,5 @@
+[submodule "third_party/pjproject"]
+	path = third_party/pjproject
+	url = https://github.com/pjsip/pjproject.git
+	# FIXADO na tag 2.17. Não definir branch e não usar update --remote.
+	# Atualizações exigem decisão arquitetural (docs/DECISIONS.md, ADR-004).

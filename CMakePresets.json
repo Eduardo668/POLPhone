@@ -1,0 +1,18 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": { "major": 3, "minor": 21, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "windows-x64",
+      "displayName": "POLPhone - Visual Studio 2022 x64",
+      "generator": "Visual Studio 17 2022",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": { "POLPHONE_BUILD_TESTS": "OFF" }
+    }
+  ],
+  "buildPresets": [
+    { "name": "build-debug", "configurePreset": "windows-x64", "configuration": "Debug" },
+    { "name": "build-release", "configurePreset": "windows-x64", "configuration": "Release" }
+  ]
+}

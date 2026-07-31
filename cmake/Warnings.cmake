@@ -1,0 +1,7 @@
+if(TARGET polphone_warnings)
+    return()
+endif()
+add_library(polphone_warnings INTERFACE)
+if(MSVC)
+    target_compile_options(polphone_warnings INTERFACE /W4 /utf-8 /EHsc /permissive-)
+endif()
