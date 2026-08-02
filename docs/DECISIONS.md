@@ -31,6 +31,7 @@
 | [ADR-021](#adr-021--propriedade-do-pjlogwriter-transferida-ao-endpoint-na-tag-217) | Propriedade do `PjLogWriter` transferida ao Endpoint na tag 2.17 | Aceito |
 | [ADR-022](#adr-022--consolelevel-do-pjsip-deve-permitir-o-callback-customizado) | `consoleLevel` do PJSIP deve permitir o callback customizado | Aceito |
 | [ADR-023](#adr-023--normalização-utf-8-dos-logs-do-backend-wmme) | Normalização UTF-8 dos logs do backend WMME | Aceito |
+| [ADR-024](#adr-024--wrapper-polphone_pj_try-sem-colisão-com-pj_try-do-pjlib) | Wrapper `POLPHONE_PJ_TRY` sem colisão com `PJ_TRY` do PJLIB | Aceito |
 
 ---
 
@@ -1027,3 +1028,39 @@
   2. **Converter toda mensagem de `CP_ACP`** — rejeitada: corromperia mensagens que já chegam em UTF-8.
   3. **Converter dentro de cada sink** — rejeitada: duplicaria a regra e permitiria que sinks futuros
      recebessem texto inválido.
+
+---
+
+## ADR-024 — Wrapper `POLPHONE_PJ_TRY` sem colisão com `PJ_TRY` do PJLIB
+
+- **Status:** Aceito — 2026-08-02
+
+- **Contexto:**
+  O desenho inicial chamou de `PJ_TRY(expr)` o wrapper que converte exceções `pj::Error` em
+  `Result<T>`. A compilação da Etapa 07 contra a tag 2.17 mostrou que `pj/except.h` já publica uma
+  macro com exatamente esse nome para o mecanismo interno de exceções C do PJLIB. Redefini-la gera
+  diagnóstico do compilador e pode alterar silenciosamente o significado de código upstream incluído
+  depois do wrapper.
+
+- **Decisão:**
+  O wrapper da aplicação se chama `POLPHONE_PJ_TRY(expr)`. A função tipada subjacente permanece
+  `polphone::sip::pjTry`, captura somente `pj::Error` e produz `Result<void>` ou `Result<T>` conforme
+  o retorno da expressão. A macro `PJ_TRY` do PJLIB nunca é removida nem redefinida.
+
+- **Motivos:**
+  - preserva integralmente a API pública e os headers da dependência fixada;
+  - torna inequívoco que o wrapper pertence ao POLPhone;
+  - mantém a decisão do ADR-015 de confinar exceções à borda PJSUA2.
+
+- **Consequências:**
+  - *Positivas:* nenhuma colisão de preprocessor e diagnóstico uniforme por `Result<T>`;
+  - *Negativas:* nome mais longo e divergente do rascunho arquitetural original;
+  - *Ação decorrente:* usar exclusivamente `POLPHONE_PJ_TRY` no código da aplicação e manter teste
+    para operações com retorno, `void` e exceção.
+
+- **Alternativas consideradas:**
+  1. **Executar `#undef PJ_TRY` e reutilizar o nome** — rejeitada: altera uma macro pública do PJLIB e
+     torna a ordem de includes perigosa.
+  2. **Não usar wrapper** — rejeitada: repetiria `try/catch` e facilitaria exceções escaparem da borda.
+  3. **Chamar apenas a função `pjTry`** — válida, mas a macro prefixada mantém a expressão original no
+     diagnóstico sem conflitar com o upstream.

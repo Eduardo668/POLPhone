@@ -366,7 +366,8 @@ struct DtmfRequest {
 
 - `std::string describe(const pj::Error&)` — `status`, `title`, `reason`, arquivo/linha.
 - `std::string statusToString(pj_status_t)` via `pj_strerror`.
-- Macro/utilitário `PJ_TRY(expr)` que captura `pj::Error` e converte para `Result<>`.
+- Macro/utilitário `POLPHONE_PJ_TRY(expr)` que captura `pj::Error` e converte para `Result<>`.
+  O prefixo evita colisão com a macro `PJ_TRY` do próprio PJLIB (ADR-024).
 
 ---
 
@@ -765,7 +766,7 @@ Estados de mídia a tratar explicitamente (todos devem gerar log):
 - PJSUA2 sinaliza erros por **exceção `pj::Error`**. Toda chamada à API é envolvida.
 - Internamente, o código de aplicação usa `Result<T>` (`expected`-like: valor ou
   `{código, mensagem, detalhe}`), **não** exceções — exceções ficam confinadas à borda do PJSUA2.
-- Conversão: `PJ_TRY(expr)` captura `pj::Error` → `Result` com `e.status`, `e.reason`, `e.title`,
+- Conversão: `POLPHONE_PJ_TRY(expr)` captura `pj::Error` → `Result` com `e.status`, `e.reason`, `e.title`,
   `e.srcFile:e.srcLine`.
 - Toda mensagem de erro exibida ao usuário inclui: **o que falhou**, **o código**, **o que fazer**.
   Exemplo: `REGISTER falhou: 408 Request Timeout — verifique conectividade UDP até <host>:<porta> e regras de firewall.`

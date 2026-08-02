@@ -2,6 +2,7 @@ add_executable(polphone_tests
     test_main.cpp
     test_config_loader.cpp
     test_config_validator.cpp
+    test_pj_errors.cpp
     test_redactor.cpp
     test_strings.cpp
 )
@@ -12,6 +13,7 @@ target_link_libraries(polphone_tests PRIVATE
     polphone_config
     polphone_logging
     polphone_pjsip_logging
+    polphone_sip
     PJSIP::pjsua2
     polphone_warnings
 )

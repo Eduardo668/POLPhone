@@ -309,7 +309,8 @@ src/app/Application.h / .cpp   (esqueleto: initialize/run/shutdown)
 - `SipEndpoint` RAII conforme ARCHITECTURE §3.6; `EpConfig` montado a partir do `AppConfig`
   (ARCHITECTURE §5.1 item 7), incluindo `medConfig.noVad = true`.
 - Transporte UDP com porta de `network.localPort` (0 = automática); logar IP:porta efetivos.
-- `PjErrors::describe` + `PJ_TRY`.
+- `PjErrors::describe` + `POLPHONE_PJ_TRY` (o prefixo evita colisão com o `PJ_TRY` do PJLIB;
+  ADR-024).
 - `Application::shutdown()` idempotente e chamado por RAII em todos os caminhos de erro.
 - `applyCodecPriorities()` + log do mapa de codecs efetivo.
 
