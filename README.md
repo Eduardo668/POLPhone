@@ -2,7 +2,7 @@
 
 POLPhone é uma prova técnica de softphone SIP para Windows x64, escrita em C++17 sobre PJSIP/PJSUA2 2.17. O MVP é operado por console e existe para comparar, de forma explícita e auditável, métodos de DTMF em chamadas SIP.
 
-O repositório já contém o build reproduzível do pjproject, utilitários base, testes unitários, logging estruturado com redaction, configuração JSON, ciclo de vida completo do endpoint, transporte SIP UDP e seleção dos dispositivos de áudio WMME. A aplicação ainda não registra uma conta, realiza chamadas ou envia DTMF.
+O repositório já contém o build reproduzível do pjproject, utilitários base, testes unitários, logging estruturado com redaction, configuração JSON, ciclo de vida completo do endpoint, transporte SIP UDP, seleção dos dispositivos de áudio WMME e registro de uma conta SIP. A aplicação ainda não realiza chamadas ou envia DTMF.
 
 ## Funcionalidades disponíveis
 
@@ -10,6 +10,7 @@ O repositório já contém o build reproduzível do pjproject, utilitários base
 - `--version` e `--selftest` do endpoint, transporte UDP, codecs e áudio;
 - `--list-devices` para enumerar captura e reprodução WMME em UTF-8;
 - seleção de áudio por nome parcial ou `#<id>`, tolerante ao truncamento do WMME;
+- registro SIP com retry automático, estado thread-safe e tradução dos erros mais comuns;
 - configuração JSON com defaults, validação semântica e diagnóstico por campo;
 - logging em console e arquivo, com níveis independentes e rotação;
 - mascaramento de credenciais, autenticação SIP e números externos nos logs;

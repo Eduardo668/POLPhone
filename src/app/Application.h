@@ -9,8 +9,11 @@
 #pragma once
 
 #include "audio/AudioDeviceService.h"
+#include "app/AppState.h"
+#include "app/EventQueue.h"
 #include "config/AppConfig.h"
 #include "logging/Logger.h"
+#include "sip/SipAccount.h"
 #include "sip/SipEndpoint.h"
 #include "util/Result.h"
 
@@ -47,9 +50,12 @@ private:
     // A ordem dos membros é a ordem de construção. O logger precisa viver
     // antes e depois do endpoint, que referencia seus sinks no PjLogWriter.
     logging::Logger logger_;
+    AppState state_;
+    EventQueue events_;
     std::optional<config::AppConfig> config_;
     std::unique_ptr<sip::SipEndpoint> endpoint_;
     std::unique_ptr<audio::AudioDeviceService> audioDevices_;
+    std::unique_ptr<sip::SipAccount> account_;
     bool initialized_{false};
     bool shutdownStarted_{false};
 };

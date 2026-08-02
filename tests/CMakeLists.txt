@@ -1,5 +1,6 @@
 add_executable(polphone_tests
     test_main.cpp
+    test_app_state.cpp
     test_audio_device_service.cpp
     test_config_loader.cpp
     test_config_validator.cpp
@@ -16,6 +17,7 @@ target_link_libraries(polphone_tests PRIVATE
     polphone_logging
     polphone_pjsip_logging
     polphone_sip
+    polphone_state
     PJSIP::pjsua2
     polphone_warnings
 )

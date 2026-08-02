@@ -95,8 +95,19 @@ target_compile_options(polphone_pjsip_logging PRIVATE
     $<$<CONFIG:Release>:/O2;/Zi>
 )
 
+add_library(polphone_state STATIC
+    src/app/AppState.cpp
+)
+target_include_directories(polphone_state PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_link_libraries(polphone_state PRIVATE polphone_warnings)
+target_compile_options(polphone_state PRIVATE
+    $<$<CONFIG:Debug>:/Zi;/Od;/RTC1>
+    $<$<CONFIG:Release>:/O2;/Zi>
+)
+
 add_library(polphone_sip STATIC
     src/sip/PjErrors.cpp
+    src/sip/SipAccount.cpp
     src/sip/SipEndpoint.cpp
 )
 target_include_directories(polphone_sip PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
@@ -111,7 +122,7 @@ target_compile_definitions(polphone_sip PRIVATE
     PJ_M_X86_64=1
 )
 target_link_libraries(polphone_sip
-    PUBLIC PJSIP::pjsua2 polphone_config polphone_logging polphone_pjsip_logging
+    PUBLIC PJSIP::pjsua2 polphone_config polphone_logging polphone_pjsip_logging polphone_state
     PRIVATE polphone_warnings
 )
 target_compile_options(polphone_sip PRIVATE
@@ -157,7 +168,7 @@ target_compile_definitions(polphone_app PRIVATE
     PJ_M_X86_64=1
 )
 target_link_libraries(polphone_app
-    PUBLIC polphone_audio polphone_config polphone_logging polphone_sip
+    PUBLIC polphone_audio polphone_config polphone_logging polphone_sip polphone_state
     PRIVATE polphone_warnings
 )
 target_compile_options(polphone_app PRIVATE

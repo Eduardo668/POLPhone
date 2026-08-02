@@ -133,6 +133,24 @@ util::Result<void> Application::initialize()
     if (const auto result = audioDevices_->apply(config_->audio); !result) {
         return failInitialization(result.error());
     }
+    if (!options_.selftest && !options_.listDevices) {
+        try {
+            account_ = std::make_unique<sip::SipAccount>(state_, events_, logger_);
+        } catch (const std::exception& error) {
+            return failInitialization(util::Error{
+                util::ErrorCode::Runtime,
+                "Não foi possível reservar a conta SIP; libere memória e tente novamente.",
+                error.what()});
+        } catch (...) {
+            return failInitialization(util::Error{
+                util::ErrorCode::Runtime,
+                "Falha desconhecida ao reservar a conta SIP; reinicie a aplicação.",
+                {}});
+        }
+        if (const auto result = account_->createFrom(config_->sip); !result) {
+            return failInitialization(result.error());
+        }
+    }
 
     initialized_ = true;
     static_cast<void>(logger_.info("app", "Inicialização do endpoint concluída."));
@@ -170,6 +188,14 @@ int Application::run()
         static_cast<void>(logger_.info(
             "app", "Selftest do endpoint, transporte e codecs concluído com sucesso."));
     }
+    for (const auto& event : events_.drain()) {
+        const auto level = event.severity == UiEventSeverity::Error
+            ? logging::LogLevel::Error
+            : event.severity == UiEventSeverity::Warning
+                ? logging::LogLevel::Warning
+                : logging::LogLevel::Info;
+        static_cast<void>(logger_.log(level, event.category, event.text));
+    }
     return 0;
 }
 
@@ -179,6 +205,10 @@ void Application::shutdown() noexcept
     shutdownStarted_ = true;
     initialized_ = false;
 
+    if (account_ != nullptr) {
+        account_->shutdownAccount();
+        account_.reset();
+    }
     audioDevices_.reset();
     if (endpoint_ != nullptr) {
         const auto destroyed = endpoint_->destroy();
