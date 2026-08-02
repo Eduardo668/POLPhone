@@ -13,6 +13,7 @@
 #include "app/EventQueue.h"
 #include "config/AppConfig.h"
 #include "logging/Logger.h"
+#include "sip/CallRegistry.h"
 #include "sip/SipAccount.h"
 #include "sip/SipEndpoint.h"
 #include "util/Result.h"
@@ -20,6 +21,7 @@
 #include <filesystem>
 #include <memory>
 #include <optional>
+#include <string_view>
 
 namespace polphone::app {
 
@@ -41,6 +43,9 @@ public:
 
     [[nodiscard]] util::Result<void> initialize();
     [[nodiscard]] int run();
+    [[nodiscard]] util::Result<void> makeCall(std::string_view destination);
+    [[nodiscard]] util::Result<void> answerCall();
+    [[nodiscard]] util::Result<void> hangupCall();
     void shutdown() noexcept;
 
 private:
@@ -55,6 +60,8 @@ private:
     std::optional<config::AppConfig> config_;
     std::unique_ptr<sip::SipEndpoint> endpoint_;
     std::unique_ptr<audio::AudioDeviceService> audioDevices_;
+    // Deve ficar vivo enquanto SipAccount/SipCall guardarem sua referência.
+    sip::CallRegistry calls_;
     std::unique_ptr<sip::SipAccount> account_;
     bool initialized_{false};
     bool shutdownStarted_{false};

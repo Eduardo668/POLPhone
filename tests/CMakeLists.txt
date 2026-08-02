@@ -6,6 +6,7 @@ add_executable(polphone_tests
     test_config_validator.cpp
     test_pj_errors.cpp
     test_redactor.cpp
+    test_sip_call.cpp
     test_strings.cpp
 )
 

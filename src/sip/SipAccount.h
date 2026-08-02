@@ -20,12 +20,13 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
-#include <memory>
 #include <mutex>
 #include <string>
 #include <string_view>
 
 namespace polphone::sip {
+
+class CallRegistry;
 
 [[nodiscard]] std::string registrationStatusMessage(
     int sipCode,
@@ -36,7 +37,8 @@ class SipAccount final : public pj::Account {
 public:
     SipAccount(app::AppState& state,
                app::EventQueue& events,
-               logging::Logger& logger) noexcept;
+               logging::Logger& logger,
+               CallRegistry& calls) noexcept;
     ~SipAccount() override;
 
     SipAccount(const SipAccount&) = delete;
@@ -52,8 +54,6 @@ public:
     void onIncomingCall(pj::OnIncomingCallParam& parameter) noexcept override;
 
 private:
-    class PendingIncomingCall;
-
     void publishRegistration(const pj::OnRegStateParam& parameter,
                              const pj::AccountInfo& information);
     void publishCallbackFailure(std::string_view callback,
@@ -62,12 +62,10 @@ private:
     app::AppState& state_;
     app::EventQueue& events_;
     logging::Logger& logger_;
+    CallRegistry& calls_;
     std::mutex registrationMutex_;
     std::condition_variable registrationCondition_;
     bool registrationActive_{false};
-    std::mutex incomingMutex_;
-    std::unique_ptr<PendingIncomingCall> incomingCall_;
-    std::atomic<bool> incomingCallActive_{false};
     std::atomic<bool> shuttingDown_{false};
     bool created_{false};
 };

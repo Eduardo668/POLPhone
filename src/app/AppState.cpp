@@ -37,4 +37,16 @@ RegistrationSnapshot AppState::registration() const
     return registration_;
 }
 
+void AppState::updateCall(CallSnapshot snapshot)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    call_ = std::move(snapshot);
+}
+
+CallSnapshot AppState::call() const
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    return call_;
+}
+
 } // namespace polphone::app

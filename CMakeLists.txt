@@ -106,8 +106,10 @@ target_compile_options(polphone_state PRIVATE
 )
 
 add_library(polphone_sip STATIC
+    src/sip/CallRegistry.cpp
     src/sip/PjErrors.cpp
     src/sip/SipAccount.cpp
+    src/sip/SipCall.cpp
     src/sip/SipEndpoint.cpp
 )
 target_include_directories(polphone_sip PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")

@@ -8,7 +8,9 @@
 
 #include "sip/SipAccount.h"
 
+#include "sip/CallRegistry.h"
 #include "sip/PjErrors.h"
+#include "sip/SipCall.h"
 
 #include <pjsip/sip_msg.h>
 
@@ -41,27 +43,6 @@ app::RegistrationState registrationStateFor(
 }
 
 } // namespace
-
-class SipAccount::PendingIncomingCall final : public pj::Call {
-public:
-    PendingIncomingCall(SipAccount& account, int callId, std::atomic<bool>& active) noexcept
-        : pj::Call(account, callId), active_(active)
-    {
-    }
-
-    void onCallState(pj::OnCallStateParam&) noexcept override
-    {
-        try {
-            const pj::CallInfo information = getInfo();
-            if (information.state == PJSIP_INV_STATE_DISCONNECTED) active_.store(false);
-        } catch (...) {
-            active_.store(false);
-        }
-    }
-
-private:
-    std::atomic<bool>& active_;
-};
 
 std::string registrationStatusMessage(
     int sipCode,
@@ -96,8 +77,9 @@ std::string registrationStatusMessage(
 
 SipAccount::SipAccount(app::AppState& state,
                        app::EventQueue& events,
-                       logging::Logger& logger) noexcept
-    : state_(state), events_(events), logger_(logger)
+                       logging::Logger& logger,
+                       CallRegistry& calls) noexcept
+    : state_(state), events_(events), logger_(logger), calls_(calls)
 {
 }
 
@@ -199,13 +181,6 @@ void SipAccount::shutdownAccount() noexcept
                 "sip", unregistered.error().message + " " + unregistered.error().detail));
         }
     }
-    std::unique_ptr<PendingIncomingCall> incomingCall;
-    {
-        std::lock_guard<std::mutex> lock(incomingMutex_);
-        incomingCall = std::move(incomingCall_);
-        incomingCallActive_.store(false);
-    }
-    incomingCall.reset();
     if (created_ && isValid()) pj::Account::shutdown();
     created_ = false;
 }
@@ -227,7 +202,7 @@ void SipAccount::onRegState(pj::OnRegStateParam& parameter) noexcept
 void SipAccount::onIncomingCall(pj::OnIncomingCallParam& parameter) noexcept
 {
     try {
-        if (shuttingDown_.load() || incomingCallActive_.load()) {
+        if (shuttingDown_.load() || calls_.hasActiveCall()) {
             pj::Call busyCall(*this, parameter.callId);
             pj::CallOpParam busyResponse(true);
             busyResponse.statusCode = PJSIP_SC_BUSY_HERE;
@@ -239,32 +214,29 @@ void SipAccount::onIncomingCall(pj::OnIncomingCallParam& parameter) noexcept
             return;
         }
 
-        auto call = std::make_unique<PendingIncomingCall>(
-            *this, parameter.callId, incomingCallActive_);
-        incomingCallActive_.store(true);
-        pj::CallOpParam response(true);
-        response.statusCode = PJSIP_SC_RINGING;
-        call->answer(response);
-
-        std::unique_ptr<PendingIncomingCall> previousCall;
-        {
-            std::lock_guard<std::mutex> lock(incomingMutex_);
-            previousCall = std::move(incomingCall_);
-            incomingCall_ = std::move(call);
+        auto call = std::make_unique<SipCall>(
+            *this, calls_, state_, events_, logger_, parameter.callId);
+        SipCall* adoptedCall = call.get();
+        const auto adopted = calls_.adopt(call);
+        if (!adopted) {
+            static_cast<void>(call->answer(PJSIP_SC_BUSY_HERE));
+            return;
         }
-        previousCall.reset();
+        const auto ringing = adoptedCall->answer(PJSIP_SC_RINGING);
+        if (!ringing) {
+            calls_.retire(adoptedCall);
+            publishCallbackFailure("onIncomingCall", ringing.error().detail);
+            return;
+        }
         static_cast<void>(events_.push(app::UiEvent{
             app::UiEventSeverity::Info,
             "call",
             "Chamada entrante aguardando atendimento (180 Ringing)."}));
     } catch (const pj::Error& error) {
-        incomingCallActive_.store(false);
         publishCallbackFailure("onIncomingCall", describe(error));
     } catch (const std::exception& error) {
-        incomingCallActive_.store(false);
         publishCallbackFailure("onIncomingCall", error.what());
     } catch (...) {
-        incomingCallActive_.store(false);
         publishCallbackFailure("onIncomingCall", "exceção desconhecida");
     }
 }
@@ -305,12 +277,18 @@ void SipAccount::publishCallbackFailure(
     std::string_view callback,
     std::string_view detail) noexcept
 {
-    static_cast<void>(logger_.error(
-        "sip", std::string(callback) + " falhou sem propagar exceção: " + std::string(detail)));
-    static_cast<void>(events_.push(app::UiEvent{
-        app::UiEventSeverity::Error,
-        "sip",
-        std::string(callback) + " falhou; consulte o log técnico."}));
+    try {
+        static_cast<void>(logger_.error(
+            "sip",
+            std::string(callback) + " falhou sem propagar exceção: " + std::string(detail)));
+        static_cast<void>(events_.push(app::UiEvent{
+            app::UiEventSeverity::Error,
+            "sip",
+            std::string(callback) + " falhou; consulte o log técnico."}));
+    } catch (...) {
+        static_cast<void>(logger_.error(
+            "sip", "Callback falhou e o diagnóstico detalhado não pôde ser alocado."));
+    }
 }
 
 } // namespace polphone::sip

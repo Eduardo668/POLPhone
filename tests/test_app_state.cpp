@@ -47,6 +47,22 @@ TEST_SUITE("registration") {
         CHECK(queue.size() == 0);
     }
 
+    TEST_CASE("AppState publica estado de chamada por cópia")
+    {
+        polphone::app::AppState state;
+        state.updateCall({
+            polphone::app::CallState::Confirmed,
+            200,
+            "OK",
+            "sip:1002@pbx.local"});
+        auto snapshot = state.call();
+        CHECK(snapshot.state == polphone::app::CallState::Confirmed);
+        CHECK(snapshot.sipCode == 200);
+        CHECK(snapshot.remoteUri == "sip:1002@pbx.local");
+        snapshot.remoteUri.clear();
+        CHECK_FALSE(state.call().remoteUri.empty());
+    }
+
     TEST_CASE("traduz respostas de registro obrigatórias")
     {
         CHECK(polphone::sip::registrationStatusMessage(401, PJ_SUCCESS, "Unauthorized")

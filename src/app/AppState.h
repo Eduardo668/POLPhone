@@ -23,6 +23,16 @@ enum class RegistrationState {
     Unregistered
 };
 
+enum class CallState {
+    Idle,
+    Incoming,
+    Calling,
+    Early,
+    Connecting,
+    Confirmed,
+    Disconnected
+};
+
 [[nodiscard]] std::string_view registrationStateName(RegistrationState state) noexcept;
 
 struct RegistrationSnapshot {
@@ -34,14 +44,24 @@ struct RegistrationSnapshot {
     std::string message;
 };
 
+struct CallSnapshot {
+    CallState state{CallState::Idle};
+    int sipCode{0};
+    std::string reason;
+    std::string remoteUri;
+};
+
 class AppState final {
 public:
     void updateRegistration(RegistrationSnapshot snapshot);
     [[nodiscard]] RegistrationSnapshot registration() const;
+    void updateCall(CallSnapshot snapshot);
+    [[nodiscard]] CallSnapshot call() const;
 
 private:
     mutable std::mutex mutex_;
     RegistrationSnapshot registration_;
+    CallSnapshot call_;
 };
 
 } // namespace polphone::app

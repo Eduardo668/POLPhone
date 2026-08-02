@@ -205,6 +205,14 @@ util::Result<void> SipEndpoint::registerThisThread(std::string_view name)
     return POLPHONE_PJ_TRY(endpoint_->libRegisterThread(std::string(name)));
 }
 
+util::Result<void> SipEndpoint::hangupAllCalls()
+{
+    if (state_ != State::Started || endpoint_ == nullptr) {
+        return invalidState("hangupAllCalls");
+    }
+    return POLPHONE_PJ_TRY(endpoint_->hangupAllCalls());
+}
+
 util::Result<void> SipEndpoint::destroy() noexcept
 {
     if (endpoint_ == nullptr) {

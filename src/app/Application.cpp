@@ -11,8 +11,10 @@
 #include "config/ConfigLoader.h"
 #include "config/ConfigValidator.h"
 #include "logging/Logger.h"
+#include "sip/SipCall.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <exception>
 #include <iostream>
@@ -135,7 +137,8 @@ util::Result<void> Application::initialize()
     }
     if (!options_.selftest && !options_.listDevices) {
         try {
-            account_ = std::make_unique<sip::SipAccount>(state_, events_, logger_);
+            account_ = std::make_unique<sip::SipAccount>(
+                state_, events_, logger_, calls_);
         } catch (const std::exception& error) {
             return failInitialization(util::Error{
                 util::ErrorCode::Runtime,
@@ -188,6 +191,7 @@ int Application::run()
         static_cast<void>(logger_.info(
             "app", "Selftest do endpoint, transporte e codecs concluído com sucesso."));
     }
+    static_cast<void>(calls_.reap());
     for (const auto& event : events_.drain()) {
         const auto level = event.severity == UiEventSeverity::Error
             ? logging::LogLevel::Error
@@ -199,11 +203,103 @@ int Application::run()
     return 0;
 }
 
+util::Result<void> Application::makeCall(std::string_view destination)
+{
+    if (!initialized_ || account_ == nullptr || config_ == std::nullopt) {
+        return util::Result<void>::failure(
+            util::ErrorCode::Runtime,
+            "A conta SIP não está pronta; inicialize a aplicação antes de ligar.");
+    }
+    const auto normalized = sip::normalizeDestination(destination, config_->sip.domain);
+    if (!normalized) return util::Result<void>::failure(normalized.error());
+
+    std::unique_ptr<sip::SipCall> call;
+    try {
+        call = std::make_unique<sip::SipCall>(
+            *account_, calls_, state_, events_, logger_);
+    } catch (const std::exception& error) {
+        return util::Result<void>::failure(
+            util::ErrorCode::Runtime,
+            "Não foi possível reservar a chamada; libere memória e tente novamente.",
+            error.what());
+    } catch (...) {
+        return util::Result<void>::failure(
+            util::ErrorCode::Runtime,
+            "Falha desconhecida ao reservar a chamada; reinicie a aplicação.");
+    }
+
+    sip::SipCall* adoptedCall = call.get();
+    if (const auto adopted = calls_.adopt(call); !adopted) return adopted;
+    const auto started = adoptedCall->start(normalized.value());
+    if (!started) {
+        calls_.retire(adoptedCall);
+        static_cast<void>(calls_.waitUntilSafeToReap(std::chrono::seconds(1)));
+        static_cast<void>(calls_.reap());
+        return started;
+    }
+    return util::Result<void>::success();
+}
+
+util::Result<void> Application::answerCall()
+{
+    sip::SipCall* call = calls_.current();
+    if (call == nullptr) {
+        return util::Result<void>::failure(
+            util::ErrorCode::Runtime,
+            "Não existe chamada ativa para atender.");
+    }
+    return call->answer(PJSIP_SC_OK);
+}
+
+util::Result<void> Application::hangupCall()
+{
+    sip::SipCall* call = calls_.current();
+    if (call == nullptr) {
+        return util::Result<void>::failure(
+            util::ErrorCode::Runtime,
+            "Não existe chamada ativa para encerrar.");
+    }
+    return call->hangupCall();
+}
+
 void Application::shutdown() noexcept
 {
     if (shutdownStarted_) return;
     shutdownStarted_ = true;
     initialized_ = false;
+
+    if (sip::SipCall* call = calls_.current(); call != nullptr) {
+        const auto hungUp = call->hangupCall();
+        if (!hungUp) {
+            static_cast<void>(logger_.warning(
+                "call", hungUp.error().message + " " + hungUp.error().detail));
+        }
+        static_cast<void>(calls_.waitUntilIdle(std::chrono::seconds(3)));
+    }
+    if (endpoint_ != nullptr && endpoint_->isStarted()) {
+        const auto allHungUp = endpoint_->hangupAllCalls();
+        if (!allHungUp) {
+            static_cast<void>(logger_.warning(
+                "call", allHungUp.error().message + " " + allHungUp.error().detail));
+        }
+        static_cast<void>(calls_.waitUntilIdle(std::chrono::seconds(1)));
+    }
+    if (sip::SipCall* remaining = calls_.current(); remaining != nullptr) {
+        calls_.retire(remaining);
+    }
+
+    if (account_ != nullptr) {
+        const auto unregistered = account_->unregisterAndWait();
+        if (!unregistered) {
+            static_cast<void>(logger_.warning(
+                "sip", unregistered.error().message + " " + unregistered.error().detail));
+        }
+    }
+    static_cast<void>(calls_.waitUntilSafeToReap(std::chrono::seconds(3)));
+    static_cast<void>(calls_.reap());
+    static_cast<void>(logger_.info(
+        "call", "Shutdown de chamadas concluído; objetos vivos="
+            + std::to_string(sip::SipCall::liveCount())));
 
     if (account_ != nullptr) {
         account_->shutdownAccount();
