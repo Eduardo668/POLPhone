@@ -8,6 +8,7 @@
 
 #include "dtmf/DtmfSender.h"
 
+#include "audio/ToneGenerator.h"
 #include "sip/CallRegistry.h"
 #include "sip/PjErrors.h"
 #include "sip/SipCall.h"
@@ -15,6 +16,7 @@
 
 #include <pjmedia/errno.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <exception>
@@ -22,19 +24,9 @@
 #include <sstream>
 #include <thread>
 #include <utility>
+#include <vector>
 
 namespace polphone::dtmf {
-namespace {
-
-util::Result<void> unsupportedMethod(DtmfMethod method)
-{
-    return util::Result<void>::failure(
-        util::ErrorCode::Runtime,
-        "O método DTMF solicitado ainda não está implementado nesta etapa.",
-        std::string(methodName(method)));
-}
-
-} // namespace
 
 util::Result<void> evaluateSipInfoResponse(
     int statusCode,
@@ -85,7 +77,16 @@ DtmfSender::DtmfSender(
 {
 }
 
-util::Result<void> DtmfSender::configure(const config::DtmfConfig& config)
+DtmfSender::~DtmfSender()
+{
+    cancelWorker_ = true;
+    if (worker_.joinable()) worker_.join();
+    toneGenerator_.reset();
+}
+
+util::Result<void> DtmfSender::configure(
+    const config::DtmfConfig& config,
+    const config::AudioConfig& audio)
 {
     const auto method = parseMethod(config.defaultMethod);
     if (!method.has_value()) {
@@ -102,6 +103,12 @@ util::Result<void> DtmfSender::configure(const config::DtmfConfig& config)
             util::ErrorCode::Validation,
             "O volume DTMF deve estar entre -30 e 0 dBm0.");
     }
+    if (audio.clockRate <= 0 || audio.channelCount < 1 || audio.channelCount > 2
+        || audio.ptimeMs <= 0 || audio.ptimeMs > 1000) {
+        return util::Result<void>::failure(
+            util::ErrorCode::Validation,
+            "O formato de áudio é inválido para o gerador DTMF in-band.");
+    }
 
     std::lock_guard<std::mutex> lock(mutex_);
     settings_ = DtmfSettings{
@@ -111,6 +118,9 @@ util::Result<void> DtmfSender::configure(const config::DtmfConfig& config)
         config.volumeDbm0,
         config.localFeedback,
         config.logDigits};
+    audioClockRate_ = static_cast<unsigned>(audio.clockRate);
+    audioChannelCount_ = static_cast<unsigned>(audio.channelCount);
+    audioPtimeMs_ = static_cast<unsigned>(audio.ptimeMs);
     return util::Result<void>::success();
 }
 
@@ -172,7 +182,12 @@ DtmfSender::InFlightGuard::InFlightGuard(DtmfSender& sender) noexcept
 
 DtmfSender::InFlightGuard::~InFlightGuard()
 {
-    sender_.finish();
+    if (active_) sender_.finish();
+}
+
+void DtmfSender::InFlightGuard::dismiss() noexcept
+{
+    active_ = false;
 }
 
 util::Result<sip::SipCall*> DtmfSender::activeCall() const
@@ -275,13 +290,360 @@ std::string DtmfSender::nextCorrelationId()
     return output.str();
 }
 
+void DtmfSender::reapWorker() noexcept
+{
+    std::thread completed;
+    try {
+        if (inFlight()) return;
+        std::lock_guard<std::mutex> lock(workerMutex_);
+        if (worker_.joinable()) completed = std::move(worker_);
+    } catch (...) {
+        return;
+    }
+    if (completed.joinable()) completed.join();
+}
+
+bool DtmfSender::waitCancelable(unsigned milliseconds) const noexcept
+{
+    unsigned elapsed = 0U;
+    while (elapsed < milliseconds) {
+        if (cancelWorker_.load()) return false;
+        const unsigned slice = (std::min)(10U, milliseconds - elapsed);
+        std::this_thread::sleep_for(std::chrono::milliseconds(slice));
+        elapsed += slice;
+    }
+    return !cancelWorker_.load();
+}
+
+util::Result<DtmfResult> DtmfSender::startInband(
+    sip::SipCall& call,
+    std::vector<DtmfPlanStep> plan,
+    const DtmfRequest& request,
+    std::string correlationId)
+{
+    call.retainExternalUse();
+    cancelWorker_ = false;
+    try {
+        std::lock_guard<std::mutex> lock(workerMutex_);
+        if (worker_.joinable()) {
+            call.releaseExternalUse();
+            return util::Result<DtmfResult>::failure(
+                util::ErrorCode::Runtime,
+                "O worker DTMF anterior ainda não foi recolhido; tente novamente.");
+        }
+        worker_ = std::thread(
+            &DtmfSender::runInband,
+            this,
+            &call,
+            std::move(plan),
+            request,
+            correlationId);
+    } catch (const std::exception& error) {
+        call.releaseExternalUse();
+        return util::Result<DtmfResult>::failure(
+            util::ErrorCode::Runtime,
+            "Não foi possível iniciar o worker DTMF in-band.",
+            error.what());
+    } catch (...) {
+        call.releaseExternalUse();
+        return util::Result<DtmfResult>::failure(
+            util::ErrorCode::Runtime,
+            "Falha desconhecida ao iniciar o worker DTMF in-band.");
+    }
+
+    DtmfResult result;
+    result.ok = true;
+    result.correlationId = std::move(correlationId);
+    result.summary = "Envio DTMF in-band iniciado em segundo plano; id="
+        + result.correlationId + ".";
+    return util::Result<DtmfResult>::success(std::move(result));
+}
+
+util::Result<void> DtmfSender::performInband(
+    sip::SipCall& call,
+    const std::vector<DtmfPlanStep>& plan,
+    const DtmfRequest& request,
+    std::string_view correlationId)
+{
+    if (toneGenerator_ == nullptr) {
+        try {
+            toneGenerator_ = std::make_unique<audio::ToneGenerator>();
+        } catch (const std::exception& error) {
+            return util::Result<void>::failure(
+                util::ErrorCode::Runtime,
+                "Não foi possível reservar o gerador DTMF in-band.",
+                error.what());
+        }
+    }
+    const auto created = toneGenerator_->create(
+        audioClockRate_, audioChannelCount_, audioPtimeMs_);
+    if (!created) return created;
+
+    const auto callMedia = call.audioMedia();
+    if (!callMedia.has_value()) {
+        return util::Result<void>::failure(
+            util::ErrorCode::Runtime,
+            "A porta de áudio da chamada não está disponível para DTMF in-band.");
+    }
+    const DtmfSettings current = settings();
+    const auto connected = toneGenerator_->connect(*callMedia, current.localFeedback);
+    if (!connected) return connected;
+
+    static_cast<void>(logger_.log(
+        logging::LogLevel::Info,
+        "dtmf",
+        "Gerador in-band conectado diretamente à chamada: slot="
+            + std::to_string(toneGenerator_->bridgeSlot())
+            + " clock=" + std::to_string(audioClockRate_) + "Hz ptime="
+            + std::to_string(audioPtimeMs_) + "ms feedbackLocal="
+            + (current.localFeedback ? "sim" : "não") + ".",
+        {},
+        correlationId));
+
+    try {
+        const pj::CallInfo information = call.getInfo();
+        for (const auto& media : information.media) {
+            if (media.type != PJMEDIA_TYPE_AUDIO
+                || media.status != PJSUA_CALL_MEDIA_ACTIVE) {
+                continue;
+            }
+            const pj::StreamInfo stream = call.getStreamInfo(media.index);
+            const std::string codec = stream.codecName;
+            const bool compatible = codec.find("PCMU") == 0U
+                || codec.find("PCMA") == 0U || codec.find("G722") == 0U
+                || codec.find("G.722") == 0U;
+            if (!compatible) {
+                static_cast<void>(logger_.log(
+                    logging::LogLevel::Warning,
+                    "dtmf",
+                    "codec negociado=" + codec + "/"
+                        + std::to_string(stream.codecClockRate)
+                        + "; tons in-band podem não ser reconhecidos. Prosseguindo para registrar o experimento.",
+                    {},
+                    correlationId));
+            }
+            break;
+        }
+    } catch (const pj::Error& error) {
+        static_cast<void>(logger_.log(
+            logging::LogLevel::Warning,
+            "dtmf",
+            "Não foi possível confirmar o codec antes do tom in-band; prosseguindo.",
+            sip::describe(error),
+            correlationId));
+    }
+
+    std::size_t totalDigits = 0U;
+    for (const auto& step : plan) {
+        if (step.kind == DtmfPlanStep::Kind::Digit) ++totalDigits;
+    }
+    std::size_t globalIndex = 0U;
+    std::size_t planIndex = 0U;
+    while (planIndex < plan.size()) {
+        if (cancelWorker_.load()) {
+            return util::Result<void>::failure(
+                util::ErrorCode::Runtime,
+                "O envio DTMF in-band foi cancelado pelo encerramento.");
+        }
+        const auto active = activeCall();
+        if (!active || active.value() != &call) {
+            return util::Result<void>::failure(
+                util::ErrorCode::Runtime,
+                "A chamada terminou ou mudou durante o DTMF in-band.");
+        }
+        if (plan[planIndex].kind == DtmfPlanStep::Kind::Pause) {
+            if (!waitCancelable(plan[planIndex].pauseMs)) {
+                return util::Result<void>::failure(
+                    util::ErrorCode::Runtime,
+                    "O envio DTMF in-band foi cancelado durante uma pausa.");
+            }
+            ++planIndex;
+            continue;
+        }
+
+        std::vector<audio::ToneDigit> batch;
+        std::vector<std::uint64_t> completionThresholds;
+        std::uint64_t expectedMs = 0U;
+        while (planIndex < plan.size()
+               && plan[planIndex].kind == DtmfPlanStep::Kind::Digit
+               && batch.size() < audio::ToneGenerator::MaxQueuedDigits) {
+            const auto& step = plan[planIndex++];
+            ++globalIndex;
+            batch.push_back(audio::ToneDigit{
+                step.digit, step.onMs, step.offMs, request.volumeDbm0});
+            expectedMs += static_cast<std::uint64_t>(step.onMs) + step.offMs;
+            completionThresholds.push_back(expectedMs);
+            static_cast<void>(logger_.log(
+                logging::LogLevel::Info,
+                "dtmf",
+                "method=inband idx=" + std::to_string(globalIndex) + "/"
+                    + std::to_string(totalDigits) + " digit="
+                    + std::string(1U, step.digit) + " duration="
+                    + std::to_string(step.onMs) + "ms gap="
+                    + std::to_string(step.offMs) + "ms volume="
+                    + std::to_string(request.volumeDbm0) + "dBm0 enfileirando",
+                {},
+                correlationId));
+        }
+
+        const auto played = toneGenerator_->playDigits(batch);
+        if (!played) return played;
+        const std::uint64_t startedAt = util::monotonicMilliseconds();
+        std::size_t completedInBatch = 0U;
+        while (toneGenerator_->isBusy()) {
+            if (cancelWorker_.load()) {
+                return util::Result<void>::failure(
+                    util::ErrorCode::Runtime,
+                    "O envio DTMF in-band foi cancelado pelo encerramento.");
+            }
+            const auto stillActive = activeCall();
+            if (!stillActive || stillActive.value() != &call) {
+                return util::Result<void>::failure(
+                    util::ErrorCode::Runtime,
+                    "A chamada terminou durante a reprodução DTMF in-band.");
+            }
+            const std::uint64_t elapsed =
+                util::monotonicMilliseconds() - startedAt;
+            while (completedInBatch < batch.size()
+                   && elapsed >= completionThresholds[completedInBatch]) {
+                const std::size_t absoluteIndex =
+                    globalIndex - batch.size() + completedInBatch + 1U;
+                static_cast<void>(logger_.log(
+                    logging::LogLevel::Info,
+                    "dtmf",
+                    "method=inband idx=" + std::to_string(absoluteIndex) + "/"
+                        + std::to_string(totalDigits) + " digit="
+                        + std::string(1U, batch[completedInBatch].digit)
+                        + " status=OK elapsed=" + std::to_string(elapsed) + "ms",
+                    {},
+                    correlationId));
+                ++completedInBatch;
+            }
+            if (elapsed > expectedMs + 500U) {
+                return util::Result<void>::failure(
+                    util::ErrorCode::Runtime,
+                    "O gerador DTMF in-band excedeu o timeout de segurança.",
+                    "esperado=" + std::to_string(expectedMs) + "ms");
+            }
+            static_cast<void>(waitCancelable(10U));
+        }
+        const std::uint64_t elapsed = util::monotonicMilliseconds() - startedAt;
+        while (completedInBatch < batch.size()) {
+            const std::size_t absoluteIndex =
+                globalIndex - batch.size() + completedInBatch + 1U;
+            static_cast<void>(logger_.log(
+                logging::LogLevel::Info,
+                "dtmf",
+                "method=inband idx=" + std::to_string(absoluteIndex) + "/"
+                    + std::to_string(totalDigits) + " digit="
+                    + std::string(1U, batch[completedInBatch].digit)
+                    + " status=OK elapsed=" + std::to_string(elapsed) + "ms",
+                {},
+                correlationId));
+            ++completedInBatch;
+        }
+    }
+    return util::Result<void>::success();
+}
+
+void DtmfSender::publishInbandFailure(
+    std::string_view correlationId,
+    const util::Error& error) noexcept
+{
+    try {
+        static_cast<void>(logger_.log(
+            logging::LogLevel::Error,
+            "dtmf",
+            "method=inband status=ERROR " + error.message,
+            error.detail,
+            correlationId));
+        static_cast<void>(events_.push(app::UiEvent{
+            app::UiEventSeverity::Error,
+            "dtmf",
+            "id=" + std::string(correlationId) + " falhou: " + error.message}));
+    } catch (...) {
+    }
+}
+
+void DtmfSender::runInband(
+    sip::SipCall* call,
+    std::vector<DtmfPlanStep> plan,
+    DtmfRequest request,
+    std::string correlationId) noexcept
+{
+    bool success = false;
+    bool reported = false;
+    try {
+        pj::Endpoint& endpoint = pj::Endpoint::instance();
+        if (!endpoint.libIsThreadRegistered()) {
+            endpoint.libRegisterThread("polphone-dtmf");
+        }
+        const auto performed = performInband(
+            *call, plan, request, correlationId);
+        success = static_cast<bool>(performed);
+        if (!performed) {
+            publishInbandFailure(correlationId, performed.error());
+            reported = true;
+        }
+    } catch (const pj::Error& error) {
+        try {
+            const util::Error translated = sip::makePjError(
+                error, "executar DTMF in-band");
+            publishInbandFailure(correlationId, translated);
+            reported = true;
+        } catch (...) {
+        }
+    } catch (const std::exception& error) {
+        try {
+            const util::Error translated{
+                util::ErrorCode::Runtime,
+                "Falha inesperada durante o DTMF in-band.",
+                error.what()};
+            publishInbandFailure(correlationId, translated);
+            reported = true;
+        } catch (...) {
+        }
+    } catch (...) {
+    }
+
+    if (toneGenerator_ != nullptr) {
+        try {
+            static_cast<void>(toneGenerator_->stop());
+        } catch (...) {
+        }
+        toneGenerator_->disconnect();
+    }
+    call->releaseExternalUse();
+    if (success) {
+        try {
+            static_cast<void>(events_.push(app::UiEvent{
+                app::UiEventSeverity::Info,
+                "dtmf",
+                "id=" + correlationId + " concluído por in-band."}));
+        } catch (...) {
+        }
+    } else if (!reported) {
+        try {
+            const util::Error unknown{
+                util::ErrorCode::Runtime,
+                "Falha desconhecida durante o DTMF in-band.",
+                {}};
+            publishInbandFailure(correlationId, unknown);
+        } catch (...) {
+        }
+    }
+    finish();
+}
+
 util::Result<DtmfResult> DtmfSender::send(const DtmfRequest& request)
 {
-    const auto plan = DtmfPlan::build(request.digits, request.durationMs, request.gapMs);
+    reapWorker();
+    auto plan = DtmfPlan::build(request.digits, request.durationMs, request.gapMs);
     if (!plan) return util::Result<DtmfResult>::failure(plan.error());
-    if (request.method == DtmfMethod::Inband) {
-        const auto unsupported = unsupportedMethod(request.method);
-        return util::Result<DtmfResult>::failure(unsupported.error());
+    if (request.volumeDbm0 < -30 || request.volumeDbm0 > 0) {
+        return util::Result<DtmfResult>::failure(
+            util::ErrorCode::InvalidArgument,
+            "O volume DTMF deve estar entre -30 e 0 dBm0.");
     }
 
     std::string correlationId;
@@ -300,6 +662,13 @@ util::Result<DtmfResult> DtmfSender::send(const DtmfRequest& request)
     const auto active = activeCall();
     if (!active) return util::Result<DtmfResult>::failure(active.error());
     sip::SipCall* call = active.value();
+
+    if (request.method == DtmfMethod::Inband) {
+        auto inband = startInband(
+            *call, std::move(plan).value(), request, std::move(correlationId));
+        if (inband) flight.dismiss();
+        return inband;
+    }
 
     if (request.method == DtmfMethod::Rfc4733) {
         const auto payloadType = telephoneEventPayloadType(*call);

@@ -134,6 +134,7 @@ target_compile_options(polphone_sip PRIVATE
 
 add_library(polphone_audio STATIC
     src/audio/AudioDeviceService.cpp
+    src/audio/ToneGenerator.cpp
 )
 target_include_directories(polphone_audio PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_compile_definitions(polphone_audio PRIVATE
@@ -171,7 +172,7 @@ target_compile_definitions(polphone_dtmf PRIVATE
     PJ_M_X86_64=1
 )
 target_link_libraries(polphone_dtmf
-    PUBLIC PJSIP::pjsua2 polphone_config polphone_logging polphone_sip polphone_state polphone_util
+    PUBLIC PJSIP::pjsua2 polphone_audio polphone_config polphone_logging polphone_sip polphone_state polphone_util
     PRIVATE polphone_warnings
 )
 target_compile_options(polphone_dtmf PRIVATE

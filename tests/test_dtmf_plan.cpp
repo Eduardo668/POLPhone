@@ -9,6 +9,7 @@
 #include "dtmf/DtmfMethod.h"
 #include "dtmf/DtmfPlan.h"
 #include "dtmf/DtmfSender.h"
+#include "audio/ToneGenerator.h"
 #include "app/AppState.h"
 #include "app/EventQueue.h"
 #include "logging/Logger.h"
@@ -88,7 +89,7 @@ TEST_SUITE("dtmf-plan") {
         CHECK_FALSE(sender.inFlight());
     }
 
-    TEST_CASE("sender não substitui silenciosamente método ainda indisponível")
+    TEST_CASE("sender aplica os mesmos guards ao método in-band")
     {
         polphone::sip::CallRegistry calls;
         polphone::app::AppState state;
@@ -99,8 +100,38 @@ TEST_SUITE("dtmf-plan") {
         const auto result = sender.send(polphone::dtmf::DtmfRequest{
             "5", polphone::dtmf::DtmfMethod::Inband, 160U, 100U, -10});
         CHECK_FALSE(result);
-        CHECK(result.error().detail == "inband");
+        CHECK(result.error().message.find("Sem chamada ativa") != std::string::npos);
         CHECK_FALSE(sender.inFlight());
+    }
+
+    TEST_CASE("converte dBm0 para amplitude PCM limitada")
+    {
+        CHECK(polphone::audio::ToneGenerator::MaxQueuedDigits == 32U);
+        CHECK(polphone::audio::toneAmplitudeFromDbm0(0) == 32767);
+        CHECK(polphone::audio::toneAmplitudeFromDbm0(-10) == 10362);
+        CHECK(polphone::audio::toneAmplitudeFromDbm0(-20) == 3277);
+        CHECK(polphone::audio::toneAmplitudeFromDbm0(-30) == 1036);
+        CHECK(polphone::audio::toneAmplitudeFromDbm0(-99) == 1036);
+        CHECK(polphone::audio::toneAmplitudeFromDbm0(10) == 32767);
+    }
+
+    TEST_CASE("valida o formato de áudio e o volume antes do in-band")
+    {
+        polphone::sip::CallRegistry calls;
+        polphone::app::AppState state;
+        polphone::app::EventQueue events;
+        polphone::logging::Logger logger;
+        polphone::dtmf::DtmfSender sender(calls, state, events, logger);
+        polphone::config::DtmfConfig dtmf;
+        polphone::config::AudioConfig audio;
+        audio.clockRate = 0;
+        CHECK_FALSE(sender.configure(dtmf, audio));
+
+        const auto invalidVolume = sender.send(polphone::dtmf::DtmfRequest{
+            "5", polphone::dtmf::DtmfMethod::Inband, 160U, 100U, -31});
+        CHECK_FALSE(invalidVolume);
+        CHECK(invalidVolume.error().message.find("volume DTMF")
+              != std::string::npos);
     }
 
     TEST_CASE("traduz respostas finais do SIP INFO")

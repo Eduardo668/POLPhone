@@ -17,10 +17,16 @@
 #include "util/Result.h"
 
 #include <atomic>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
+
+namespace polphone::audio {
+class ToneGenerator;
+}
 
 namespace polphone::sip {
 class CallRegistry;
@@ -70,11 +76,14 @@ public:
                app::AppState& state,
                app::EventQueue& events,
                logging::Logger& logger) noexcept;
+    ~DtmfSender();
 
     DtmfSender(const DtmfSender&) = delete;
     DtmfSender& operator=(const DtmfSender&) = delete;
 
-    [[nodiscard]] util::Result<void> configure(const config::DtmfConfig& config);
+    [[nodiscard]] util::Result<void> configure(
+        const config::DtmfConfig& config,
+        const config::AudioConfig& audio = config::AudioConfig{});
     [[nodiscard]] DtmfSettings settings() const;
     [[nodiscard]] util::Result<DtmfResult> send(const DtmfRequest& request);
     [[nodiscard]] bool inFlight() const noexcept;
@@ -84,12 +93,14 @@ private:
     public:
         explicit InFlightGuard(DtmfSender& sender) noexcept;
         ~InFlightGuard();
+        void dismiss() noexcept;
 
         InFlightGuard(const InFlightGuard&) = delete;
         InFlightGuard& operator=(const InFlightGuard&) = delete;
 
     private:
         DtmfSender& sender_;
+        bool active_{true};
     };
 
     [[nodiscard]] util::Result<void> begin(std::string correlationId);
@@ -106,6 +117,26 @@ private:
         unsigned durationMs,
         std::string_view correlationId);
     [[nodiscard]] std::string nextCorrelationId();
+    [[nodiscard]] util::Result<DtmfResult> startInband(
+        sip::SipCall& call,
+        std::vector<DtmfPlanStep> plan,
+        const DtmfRequest& request,
+        std::string correlationId);
+    void runInband(
+        sip::SipCall* call,
+        std::vector<DtmfPlanStep> plan,
+        DtmfRequest request,
+        std::string correlationId) noexcept;
+    [[nodiscard]] util::Result<void> performInband(
+        sip::SipCall& call,
+        const std::vector<DtmfPlanStep>& plan,
+        const DtmfRequest& request,
+        std::string_view correlationId);
+    [[nodiscard]] bool waitCancelable(unsigned milliseconds) const noexcept;
+    void reapWorker() noexcept;
+    void publishInbandFailure(
+        std::string_view correlationId,
+        const util::Error& error) noexcept;
 
     sip::CallRegistry& calls_;
     app::AppState& state_;
@@ -116,6 +147,13 @@ private:
     bool inFlight_{false};
     std::string currentCorrelationId_;
     std::atomic<unsigned long long> sequence_{0U};
+    unsigned audioClockRate_{8000U};
+    unsigned audioChannelCount_{1U};
+    unsigned audioPtimeMs_{20U};
+    std::unique_ptr<audio::ToneGenerator> toneGenerator_;
+    mutable std::mutex workerMutex_;
+    std::thread worker_;
+    std::atomic<bool> cancelWorker_{false};
 };
 
 } // namespace polphone::dtmf

@@ -2,12 +2,13 @@
 
 POLPhone é uma prova técnica de softphone SIP para Windows x64, escrita em C++17 sobre PJSIP/PJSUA2 2.17. O MVP é operado por console e existe para comparar, de forma explícita e auditável, métodos de DTMF em chamadas SIP.
 
-O repositório já contém o build reproduzível do pjproject, utilitários base, testes unitários, logging estruturado com redaction, configuração JSON, ciclo de vida completo do endpoint, transporte SIP UDP, seleção dos dispositivos de áudio WMME, registro de uma conta SIP, chamadas com áudio bidirecional, console interativo e envio DTMF por RFC 4733 ou SIP INFO. O método in-band ainda está em desenvolvimento.
+O repositório já contém o build reproduzível do pjproject, utilitários base, testes unitários, logging estruturado com redaction, configuração JSON, ciclo de vida completo do endpoint, transporte SIP UDP, seleção dos dispositivos de áudio WMME, registro de uma conta SIP, chamadas com áudio bidirecional, console interativo e envio DTMF explícito pelos três métodos: RFC 4733, SIP INFO e in-band.
 
 ## Funcionalidades disponíveis
 
 - build Debug e Release para Windows x64 com Visual Studio 2022;
-- `--version` e `--selftest` do endpoint, transporte UDP, codecs e áudio;
+- `--version` e `--selftest` do endpoint, transporte UDP, codecs, áudio e 50 ciclos de
+  registro/remoção do gerador in-band na conference bridge;
 - `--list-devices` para enumerar captura e reprodução WMME em UTF-8;
 - seleção de áudio por nome parcial ou `#<id>`, tolerante ao truncamento do WMME;
 - registro SIP com retry automático, estado thread-safe e tradução dos erros mais comuns;
@@ -19,6 +20,8 @@ O repositório já contém o build reproduzível do pjproject, utilitários base
   guards de chamada/mídia, serialização e erro traduzido quando `telephone-event` não foi negociado;
 - DTMF SIP INFO com `application/dtmf-relay`, resposta correlacionada por envio, timeout limitado e
   tradução de 415, 481 e 501;
+- DTMF in-band com `pjmedia_tonegen`, pool/porta próprios, conexão direta à chamada, worker
+  cancelável, timeout de segurança e aviso para codecs inadequados;
 - seleção explícita do método DTMF, sem fallback automático, com logs correlacionados e
   dígitos mascarados por padrão;
 - encerramento gracioso por `quit` ou `Ctrl+C` (código 130 para interrupção);
@@ -111,12 +114,14 @@ Use `help` para listar todos os comandos. O fluxo básico é `status`, `call <de
 ```text
 dtmf 5 --method rfc4733
 dtmf 5 --method info
+dtmf 5 --method inband --duration 250
 dtmf 12,3# --duration 250 --gap 100
 ```
 
 A vírgula insere uma pausa fixa de 500 ms. São aceitos `0-9`, `*`, `#` e `A-D`; duração e
-intervalo por requisição não alteram os defaults. `dtmfmode` e `dtmfcfg` já são reconhecidos, mas
-serão habilitados após a implementação da modalidade in-band.
+intervalo por requisição não alteram os defaults. O envio in-band ocorre em segundo plano e deixa o
+console responsivo; prefira PCMU/PCMA, `audio.clockRate=8000` e `audio.noVad=true` nos testes.
+`dtmfmode` e `dtmfcfg` já são reconhecidos e serão habilitados na próxima etapa.
 
 Para listar os dispositivos sem exigir um arquivo de configuração local:
 

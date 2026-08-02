@@ -9,6 +9,7 @@
 #include "app/Application.h"
 
 #include "app/ConsoleUi.h"
+#include "audio/ToneGenerator.h"
 #include "config/ConfigLoader.h"
 #include "config/ConfigValidator.h"
 #include "logging/Logger.h"
@@ -183,7 +184,9 @@ util::Result<void> Application::initialize()
                 "Falha desconhecida ao reservar o serviço DTMF.",
                 {}});
         }
-        if (const auto result = dtmfSender_->configure(config_->dtmf); !result) {
+        if (const auto result = dtmfSender_->configure(
+                config_->dtmf, config_->audio);
+            !result) {
             return failInitialization(result.error());
         }
         try {
@@ -235,6 +238,24 @@ int Application::run()
         return 0;
     }
     if (options_.selftest) {
+        for (unsigned iteration = 0U; iteration < 50U; ++iteration) {
+            audio::ToneGenerator toneGenerator;
+            const auto created = toneGenerator.create(
+                static_cast<unsigned>(config_->audio.clockRate),
+                static_cast<unsigned>(config_->audio.channelCount),
+                static_cast<unsigned>(config_->audio.ptimeMs));
+            if (!created) {
+                static_cast<void>(logger_.log(
+                    logging::LogLevel::Error,
+                    "dtmf",
+                    "Selftest do ciclo de vida do tonegen falhou.",
+                    created.error().detail));
+                return 3;
+            }
+        }
+        static_cast<void>(logger_.info(
+            "dtmf",
+            "Selftest do tonegen concluído: 50 registros/remoções da conference bridge."));
         static_cast<void>(logger_.info(
             "app", "Selftest do endpoint, transporte e codecs concluído com sucesso."));
     }

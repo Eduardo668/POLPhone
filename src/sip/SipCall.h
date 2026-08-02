@@ -62,6 +62,8 @@ public:
     [[nodiscard]] util::Result<void> answer(int statusCode = PJSIP_SC_OK);
     [[nodiscard]] util::Result<void> hangupCall();
     [[nodiscard]] bool canReap() const noexcept;
+    void retainExternalUse() noexcept;
+    void releaseExternalUse() noexcept;
     [[nodiscard]] static std::size_t liveCount() noexcept;
     [[nodiscard]] std::optional<pj::AudioMedia> audioMedia() const;
     [[nodiscard]] int audioConfSlot() const noexcept;
@@ -119,6 +121,7 @@ private:
     std::deque<std::shared_ptr<PendingInfo>> unboundInfo_;
     std::unordered_map<void*, std::shared_ptr<PendingInfo>> infoTransactions_;
     std::atomic<unsigned> callbackDepth_{0U};
+    std::atomic<unsigned> externalUseDepth_{0U};
     static std::atomic<std::size_t> liveCount_;
 };
 

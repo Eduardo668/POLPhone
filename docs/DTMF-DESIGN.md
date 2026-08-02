@@ -180,11 +180,11 @@ Reprodução:
   d[i].digit    = '5';
   d[i].on_msec  = settings.durationMs;
   d[i].off_msec = settings.gapMs;
-  d[i].volume   = settings.volumeDbm0;   // 0 = padrão do PJMEDIA; negativo = mais baixo
+  d[i].volume   = dbm0ToPcmAmplitude(settings.volumeDbm0); // pjmedia espera amplitude 1..32767
   pjmedia_tonegen_play_digits(tonegenPort, N, d, 0);
 
 Conclusão:
-  pjmedia_tonegen_is_busy(tonegenPort) == 0   → sequência terminou
+pjmedia_tonegen_is_busy(tonegenPort) == 0   → sequência terminou
   pjmedia_tonegen_stop(tonegenPort)           → aborta
 
 Destruição:
@@ -192,6 +192,11 @@ Destruição:
   pjmedia_port_destroy(tonegenPort)
   pj_pool_release(pool)
 ```
+
+> **Confirmação na tag 2.17:** apesar do nome da configuração, o campo `volume` de
+> `pjmedia_tone_digit` não recebe dBm0; ele recebe amplitude PCM entre 1 e 32767 (`0` seleciona
+> `PJMEDIA_TONEGEN_VOLUME`). O POLPhone converte `volumeDbm0` por `32767 × 10^(dBm0/20)` antes de
+> chamar o PJMEDIA.
 
 > **Ponto de atenção:** `pjmedia_tonegen_play_digits` recebe a sequência inteira e a reproduz de
 > forma assíncrona. O `DtmfSender` **não** deve dormir a duração total na thread do console; ele

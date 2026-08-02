@@ -268,7 +268,21 @@ bool SipCall::hasActiveAudio() const noexcept
 
 bool SipCall::canReap() const noexcept
 {
-    return callbackDepth_.load() == 0U;
+    return callbackDepth_.load() == 0U && externalUseDepth_.load() == 0U;
+}
+
+void SipCall::retainExternalUse() noexcept
+{
+    ++externalUseDepth_;
+}
+
+void SipCall::releaseExternalUse() noexcept
+{
+    unsigned current = externalUseDepth_.load();
+    while (current != 0U
+           && !externalUseDepth_.compare_exchange_weak(current, current - 1U)) {
+    }
+    registry_.notifyCallbackComplete();
 }
 
 std::size_t SipCall::liveCount() noexcept
