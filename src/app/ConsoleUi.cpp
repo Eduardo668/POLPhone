@@ -273,8 +273,25 @@ ConsoleUi::DispatchResult ConsoleUi::dispatch(const Command& command)
         break;
     }
     case CommandVerb::DtmfMode:
+        result = application_.setDtmfDefaultMethod(*command.method);
+        if (result) {
+            output_ << "Método DTMF padrão atualizado para "
+                    << dtmf::methodName(*command.method) << ".\n";
+        }
+        break;
     case CommandVerb::DtmfConfig:
-        output_ << "Comando reconhecido; configuração DTMF em runtime será habilitada na etapa 16.\n";
+        switch (*command.dtmfField) {
+        case DtmfConfigField::Duration:
+            result = application_.setDtmfDurationMs(*command.value);
+            break;
+        case DtmfConfigField::Gap:
+            result = application_.setDtmfGapMs(*command.value);
+            break;
+        case DtmfConfigField::Volume:
+            result = application_.setDtmfVolumeDbm0(*command.value);
+            break;
+        }
+        if (result) output_ << "Configuração DTMF atualizada.\n";
         break;
     case CommandVerb::Codecs:
         printCodecs();

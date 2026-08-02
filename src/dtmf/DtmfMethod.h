@@ -20,6 +20,12 @@ enum class DtmfMethod {
     SipInfo
 };
 
+enum class DtmfExecutionPath {
+    Rfc4733,
+    Inband,
+    SipInfo
+};
+
 [[nodiscard]] inline std::string_view methodName(DtmfMethod method) noexcept
 {
     switch (method) {
@@ -43,6 +49,17 @@ enum class DtmfMethod {
     }
     if (normalized == "inband") return DtmfMethod::Inband;
     if (normalized == "info") return DtmfMethod::SipInfo;
+    return std::nullopt;
+}
+
+[[nodiscard]] inline std::optional<DtmfExecutionPath> executionPathFor(
+    DtmfMethod method) noexcept
+{
+    switch (method) {
+    case DtmfMethod::Rfc4733: return DtmfExecutionPath::Rfc4733;
+    case DtmfMethod::Inband: return DtmfExecutionPath::Inband;
+    case DtmfMethod::SipInfo: return DtmfExecutionPath::SipInfo;
+    }
     return std::nullopt;
 }
 

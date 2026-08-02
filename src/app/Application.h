@@ -69,6 +69,10 @@ public:
         int id);
     [[nodiscard]] util::Result<std::vector<sip::EffectiveCodec>> listCodecs();
     [[nodiscard]] util::Result<void> setConsoleLogLevel(int level);
+    [[nodiscard]] util::Result<void> setDtmfDefaultMethod(dtmf::DtmfMethod method);
+    [[nodiscard]] util::Result<void> setDtmfDurationMs(int durationMs);
+    [[nodiscard]] util::Result<void> setDtmfGapMs(int gapMs);
+    [[nodiscard]] util::Result<void> setDtmfVolumeDbm0(int volumeDbm0);
     [[nodiscard]] util::Result<dtmf::DtmfResult> sendDtmf(
         std::string_view digits,
         std::optional<dtmf::DtmfMethod> method,

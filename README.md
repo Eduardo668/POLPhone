@@ -121,7 +121,19 @@ dtmf 12,3# --duration 250 --gap 100
 A vírgula insere uma pausa fixa de 500 ms. São aceitos `0-9`, `*`, `#` e `A-D`; duração e
 intervalo por requisição não alteram os defaults. O envio in-band ocorre em segundo plano e deixa o
 console responsivo; prefira PCMU/PCMA, `audio.clockRate=8000` e `audio.noVad=true` nos testes.
-`dtmfmode` e `dtmfcfg` já são reconhecidos e serão habilitados na próxima etapa.
+Os defaults da sessão podem ser alterados imediatamente, inclusive durante uma chamada, sem mudar o
+arquivo JSON:
+
+```text
+dtmfmode inband
+dtmfcfg duration 250
+dtmfcfg gap 150
+dtmfcfg volume -5
+status
+```
+
+As faixas aceitas são 40–2000 ms para duração, 20–2000 ms para intervalo e -30–0 dBm0 para o
+volume in-band. Uma segunda requisição enquanto outra está em voo é recusada com o ID da primeira.
 
 Para listar os dispositivos sem exigir um arquivo de configuração local:
 

@@ -8,6 +8,7 @@
 
 #include "dtmf/DtmfMethod.h"
 #include "dtmf/DtmfPlan.h"
+#include "dtmf/DtmfRequestGate.h"
 #include "dtmf/DtmfSender.h"
 #include "audio/ToneGenerator.h"
 #include "app/AppState.h"
@@ -17,6 +18,11 @@
 #include "sip/CallRegistry.h"
 
 #include <doctest/doctest.h>
+
+#include <atomic>
+#include <condition_variable>
+#include <mutex>
+#include <thread>
 
 TEST_SUITE("dtmf-plan") {
     TEST_CASE("expande dígitos e pausa preservando temporização")
@@ -67,6 +73,105 @@ TEST_SUITE("dtmf-plan") {
         CHECK(polphone::dtmf::parseMethod("info")
               == polphone::dtmf::DtmfMethod::SipInfo);
         CHECK_FALSE(polphone::dtmf::parseMethod("auto"));
+    }
+
+    TEST_CASE("cada método resolve para exatamente um caminho de execução")
+    {
+        using polphone::dtmf::DtmfExecutionPath;
+        using polphone::dtmf::DtmfMethod;
+        CHECK(polphone::dtmf::executionPathFor(DtmfMethod::Rfc4733)
+              == DtmfExecutionPath::Rfc4733);
+        CHECK(polphone::dtmf::executionPathFor(DtmfMethod::Inband)
+              == DtmfExecutionPath::Inband);
+        CHECK(polphone::dtmf::executionPathFor(DtmfMethod::SipInfo)
+              == DtmfExecutionPath::SipInfo);
+        CHECK_FALSE(polphone::dtmf::executionPathFor(
+            static_cast<DtmfMethod>(999)));
+    }
+
+    TEST_CASE("gate recusa requisição concorrente e informa o id em execução")
+    {
+        polphone::dtmf::DtmfRequestGate gate;
+        std::mutex synchronizationMutex;
+        std::condition_variable synchronization;
+        bool ready = false;
+        bool release = false;
+        std::atomic<bool> firstSucceeded{false};
+
+        std::thread first([&] {
+            const auto started = gate.begin("dtmf-concorrente-1");
+            firstSucceeded = static_cast<bool>(started);
+            {
+                std::lock_guard<std::mutex> lock(synchronizationMutex);
+                ready = true;
+            }
+            synchronization.notify_one();
+            std::unique_lock<std::mutex> lock(synchronizationMutex);
+            synchronization.wait(lock, [&] { return release; });
+            if (started) gate.finish();
+        });
+
+        {
+            std::unique_lock<std::mutex> lock(synchronizationMutex);
+            synchronization.wait(lock, [&] { return ready; });
+        }
+        CHECK(firstSucceeded.load());
+        const auto refused = gate.begin("dtmf-concorrente-2");
+        CHECK_FALSE(refused);
+        if (!refused) {
+            CHECK(refused.error().detail == "dtmf-concorrente-1");
+        }
+        CHECK(gate.inFlight());
+        CHECK(gate.currentCorrelationId() == "dtmf-concorrente-1");
+
+        {
+            std::lock_guard<std::mutex> lock(synchronizationMutex);
+            release = true;
+        }
+        synchronization.notify_one();
+        first.join();
+        CHECK_FALSE(gate.inFlight());
+        gate.finish();
+        CHECK(gate.begin("dtmf-concorrente-3"));
+        gate.finish();
+    }
+
+    TEST_CASE("defaults DTMF mudam em runtime com validação de faixa")
+    {
+        polphone::sip::CallRegistry calls;
+        polphone::app::AppState state;
+        polphone::app::EventQueue events;
+        polphone::logging::Logger logger;
+        polphone::dtmf::DtmfSender sender(calls, state, events, logger);
+        polphone::config::DtmfConfig config;
+        REQUIRE(sender.configure(config));
+
+        CHECK(sender.setDefaultMethod(polphone::dtmf::DtmfMethod::Inband));
+        CHECK(sender.setDurationMs(250));
+        CHECK(sender.setGapMs(150));
+        CHECK(sender.setVolumeDbm0(-5));
+        const auto changed = sender.settings();
+        CHECK(changed.defaultMethod == polphone::dtmf::DtmfMethod::Inband);
+        CHECK(changed.durationMs == 250U);
+        CHECK(changed.gapMs == 150U);
+        CHECK(changed.volumeDbm0 == -5);
+
+        CHECK_FALSE(sender.setDurationMs(39));
+        CHECK_FALSE(sender.setDurationMs(2001));
+        CHECK_FALSE(sender.setGapMs(19));
+        CHECK_FALSE(sender.setGapMs(2001));
+        CHECK_FALSE(sender.setVolumeDbm0(-31));
+        CHECK_FALSE(sender.setVolumeDbm0(1));
+        CHECK(sender.settings().durationMs == 250U);
+
+        const auto requestOverride = sender.send(polphone::dtmf::DtmfRequest{
+            "5", polphone::dtmf::DtmfMethod::SipInfo, 400U, 300U, -20});
+        CHECK_FALSE(requestOverride);
+        const auto unchanged = sender.settings();
+        CHECK(unchanged.defaultMethod == polphone::dtmf::DtmfMethod::Inband);
+        CHECK(unchanged.durationMs == 250U);
+        CHECK(unchanged.gapMs == 150U);
+        CHECK(unchanged.volumeDbm0 == -5);
     }
 
     TEST_CASE("sender recusa envio sem chamada e sempre libera inFlight")

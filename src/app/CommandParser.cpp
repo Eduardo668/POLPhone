@@ -142,16 +142,20 @@ util::Result<Command> CommandParser::parse(std::string_view line)
             } else if (flag == "--duration") {
                 if (command.durationMs.has_value()) return invalid("--duration foi informado mais de uma vez.");
                 command.durationMs = parseInteger(tokens[index + 1U]);
-                if (!command.durationMs.has_value() || *command.durationMs <= 0) {
+                if (!command.durationMs.has_value()
+                    || *command.durationMs < 40 || *command.durationMs > 2000) {
                     return invalid(
-                        "A duração deve ser um inteiro positivo.", tokens[index + 1U]);
+                        "A duração DTMF deve estar entre 40 e 2000 ms.",
+                        tokens[index + 1U]);
                 }
             } else if (flag == "--gap") {
                 if (command.gapMs.has_value()) return invalid("--gap foi informado mais de uma vez.");
                 command.gapMs = parseInteger(tokens[index + 1U]);
-                if (!command.gapMs.has_value() || *command.gapMs <= 0) {
+                if (!command.gapMs.has_value()
+                    || *command.gapMs < 20 || *command.gapMs > 2000) {
                     return invalid(
-                        "O intervalo deve ser um inteiro positivo.", tokens[index + 1U]);
+                        "O intervalo DTMF deve estar entre 20 e 2000 ms.",
+                        tokens[index + 1U]);
                 }
             } else {
                 return invalid("Flag DTMF desconhecida.", tokens[index]);
@@ -180,6 +184,18 @@ util::Result<Command> CommandParser::parse(std::string_view line)
         else return invalid("Campo DTMF inválido; use duration, gap ou volume.", tokens[1]);
         command.value = parseInteger(tokens[2]);
         if (!command.value.has_value()) return invalid("O valor DTMF deve ser um inteiro.", tokens[2]);
+        if (command.dtmfField == DtmfConfigField::Duration
+            && (*command.value < 40 || *command.value > 2000)) {
+            return invalid("A duração DTMF deve estar entre 40 e 2000 ms.", tokens[2]);
+        }
+        if (command.dtmfField == DtmfConfigField::Gap
+            && (*command.value < 20 || *command.value > 2000)) {
+            return invalid("O intervalo DTMF deve estar entre 20 e 2000 ms.", tokens[2]);
+        }
+        if (command.dtmfField == DtmfConfigField::Volume
+            && (*command.value < -30 || *command.value > 0)) {
+            return invalid("O volume DTMF deve estar entre -30 e 0 dBm0.", tokens[2]);
+        }
         command.verb = CommandVerb::DtmfConfig;
         return util::Result<Command>::success(std::move(command));
     }

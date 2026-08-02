@@ -62,6 +62,14 @@ TEST_SUITE("parser") {
         CHECK(CommandParser::parse("dtmfcfg duration 160"));
         CHECK(CommandParser::parse("dtmfcfg gap 100"));
         CHECK(CommandParser::parse("dtmfcfg volume -10"));
+        CHECK(CommandParser::parse("dtmf 5 --duration 40 --gap 20"));
+        CHECK(CommandParser::parse("dtmf 5 --duration 2000 --gap 2000"));
+        CHECK(CommandParser::parse("dtmfcfg duration 40"));
+        CHECK(CommandParser::parse("dtmfcfg duration 2000"));
+        CHECK(CommandParser::parse("dtmfcfg gap 20"));
+        CHECK(CommandParser::parse("dtmfcfg gap 2000"));
+        CHECK(CommandParser::parse("dtmfcfg volume -30"));
+        CHECK(CommandParser::parse("dtmfcfg volume 0"));
     }
 
     TEST_CASE("rejeita flags DTMF malformadas ou duplicadas")
@@ -75,6 +83,16 @@ TEST_SUITE("parser") {
         CHECK_FALSE(CommandParser::parse("dtmf 1 --fallback info"));
         CHECK_FALSE(CommandParser::parse("dtmfmode auto"));
         CHECK_FALSE(CommandParser::parse("dtmfcfg unknown 1"));
+        CHECK_FALSE(CommandParser::parse("dtmf 1 --duration 39"));
+        CHECK_FALSE(CommandParser::parse("dtmf 1 --duration 2001"));
+        CHECK_FALSE(CommandParser::parse("dtmf 1 --gap 19"));
+        CHECK_FALSE(CommandParser::parse("dtmf 1 --gap 2001"));
+        CHECK_FALSE(CommandParser::parse("dtmfcfg duration 39"));
+        CHECK_FALSE(CommandParser::parse("dtmfcfg duration 2001"));
+        CHECK_FALSE(CommandParser::parse("dtmfcfg gap 19"));
+        CHECK_FALSE(CommandParser::parse("dtmfcfg gap 2001"));
+        CHECK_FALSE(CommandParser::parse("dtmfcfg volume -31"));
+        CHECK_FALSE(CommandParser::parse("dtmfcfg volume 1"));
     }
 
     TEST_CASE("valida nível de log")

@@ -110,7 +110,7 @@ util::Result<void> DtmfSender::configure(
             "O formato de áudio é inválido para o gerador DTMF in-band.");
     }
 
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::mutex> lock(settingsMutex_);
     settings_ = DtmfSettings{
         *method,
         static_cast<unsigned>(config.durationMs),
@@ -126,53 +126,61 @@ util::Result<void> DtmfSender::configure(
 
 DtmfSettings DtmfSender::settings() const
 {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::mutex> lock(settingsMutex_);
     return settings_;
+}
+
+util::Result<void> DtmfSender::setDefaultMethod(DtmfMethod method)
+{
+    if (!executionPathFor(method).has_value()) {
+        return util::Result<void>::failure(
+            util::ErrorCode::InvalidArgument,
+            "O método DTMF informado não é suportado.");
+    }
+    std::lock_guard<std::mutex> lock(settingsMutex_);
+    settings_.defaultMethod = method;
+    return util::Result<void>::success();
+}
+
+util::Result<void> DtmfSender::setDurationMs(int durationMs)
+{
+    if (durationMs < 40 || durationMs > 2000) {
+        return util::Result<void>::failure(
+            util::ErrorCode::InvalidArgument,
+            "A duração DTMF deve estar entre 40 e 2000 ms.");
+    }
+    std::lock_guard<std::mutex> lock(settingsMutex_);
+    settings_.durationMs = static_cast<unsigned>(durationMs);
+    return util::Result<void>::success();
+}
+
+util::Result<void> DtmfSender::setGapMs(int gapMs)
+{
+    if (gapMs < 20 || gapMs > 2000) {
+        return util::Result<void>::failure(
+            util::ErrorCode::InvalidArgument,
+            "O intervalo DTMF deve estar entre 20 e 2000 ms.");
+    }
+    std::lock_guard<std::mutex> lock(settingsMutex_);
+    settings_.gapMs = static_cast<unsigned>(gapMs);
+    return util::Result<void>::success();
+}
+
+util::Result<void> DtmfSender::setVolumeDbm0(int volumeDbm0)
+{
+    if (volumeDbm0 < -30 || volumeDbm0 > 0) {
+        return util::Result<void>::failure(
+            util::ErrorCode::InvalidArgument,
+            "O volume DTMF deve estar entre -30 e 0 dBm0.");
+    }
+    std::lock_guard<std::mutex> lock(settingsMutex_);
+    settings_.volumeDbm0 = volumeDbm0;
+    return util::Result<void>::success();
 }
 
 bool DtmfSender::inFlight() const noexcept
 {
-    try {
-        std::lock_guard<std::mutex> lock(mutex_);
-        return inFlight_;
-    } catch (...) {
-        return true;
-    }
-}
-
-util::Result<void> DtmfSender::begin(std::string correlationId)
-{
-    try {
-        std::lock_guard<std::mutex> lock(mutex_);
-        if (inFlight_) {
-            return util::Result<void>::failure(
-                util::ErrorCode::Runtime,
-                "Já existe um envio DTMF em andamento; aguarde sua conclusão.",
-                currentCorrelationId_);
-        }
-        currentCorrelationId_ = std::move(correlationId);
-        inFlight_ = true;
-        return util::Result<void>::success();
-    } catch (const std::exception& error) {
-        return util::Result<void>::failure(
-            util::ErrorCode::Runtime,
-            "Não foi possível iniciar o envio DTMF.",
-            error.what());
-    } catch (...) {
-        return util::Result<void>::failure(
-            util::ErrorCode::Runtime,
-            "Falha desconhecida ao iniciar o envio DTMF.");
-    }
-}
-
-void DtmfSender::finish() noexcept
-{
-    try {
-        std::lock_guard<std::mutex> lock(mutex_);
-        inFlight_ = false;
-        currentCorrelationId_.clear();
-    } catch (...) {
-    }
+    return requestGate_.inFlight();
 }
 
 DtmfSender::InFlightGuard::InFlightGuard(DtmfSender& sender) noexcept
@@ -182,7 +190,7 @@ DtmfSender::InFlightGuard::InFlightGuard(DtmfSender& sender) noexcept
 
 DtmfSender::InFlightGuard::~InFlightGuard()
 {
-    if (active_) sender_.finish();
+    if (active_) sender_.requestGate_.finish();
 }
 
 void DtmfSender::InFlightGuard::dismiss() noexcept
@@ -632,7 +640,7 @@ void DtmfSender::runInband(
         } catch (...) {
         }
     }
-    finish();
+    requestGate_.finish();
 }
 
 util::Result<DtmfResult> DtmfSender::send(const DtmfRequest& request)
@@ -645,6 +653,12 @@ util::Result<DtmfResult> DtmfSender::send(const DtmfRequest& request)
             util::ErrorCode::InvalidArgument,
             "O volume DTMF deve estar entre -30 e 0 dBm0.");
     }
+    const auto executionPath = executionPathFor(request.method);
+    if (!executionPath.has_value()) {
+        return util::Result<DtmfResult>::failure(
+            util::ErrorCode::InvalidArgument,
+            "O método DTMF informado não possui um caminho de execução.");
+    }
 
     std::string correlationId;
     try {
@@ -655,7 +669,7 @@ util::Result<DtmfResult> DtmfSender::send(const DtmfRequest& request)
             "Não foi possível criar o identificador do envio DTMF.",
             error.what());
     }
-    const auto started = begin(correlationId);
+    const auto started = requestGate_.begin(correlationId);
     if (!started) return util::Result<DtmfResult>::failure(started.error());
     InFlightGuard flight(*this);
 
@@ -663,14 +677,14 @@ util::Result<DtmfResult> DtmfSender::send(const DtmfRequest& request)
     if (!active) return util::Result<DtmfResult>::failure(active.error());
     sip::SipCall* call = active.value();
 
-    if (request.method == DtmfMethod::Inband) {
+    if (*executionPath == DtmfExecutionPath::Inband) {
         auto inband = startInband(
             *call, std::move(plan).value(), request, std::move(correlationId));
         if (inband) flight.dismiss();
         return inband;
     }
 
-    if (request.method == DtmfMethod::Rfc4733) {
+    if (*executionPath == DtmfExecutionPath::Rfc4733) {
         const auto payloadType = telephoneEventPayloadType(*call);
         if (!payloadType || payloadType.value() < 0) {
             static_cast<void>(logger_.log(
@@ -729,7 +743,7 @@ util::Result<DtmfResult> DtmfSender::send(const DtmfRequest& request)
             {},
             correlationId));
         const std::uint64_t startedAt = util::monotonicMilliseconds();
-        const auto sent = request.method == DtmfMethod::Rfc4733
+        const auto sent = *executionPath == DtmfExecutionPath::Rfc4733
             ? sendRfc4733(*call, step.digit, step.onMs)
             : sendSipInfo(*call, step.digit, step.onMs, correlationId);
         if (!sent) {

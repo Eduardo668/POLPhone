@@ -158,6 +158,7 @@ target_compile_options(polphone_audio PRIVATE
 
 add_library(polphone_dtmf STATIC
     src/dtmf/DtmfPlan.cpp
+    src/dtmf/DtmfRequestGate.cpp
     src/dtmf/DtmfSender.cpp
 )
 target_include_directories(polphone_dtmf PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")

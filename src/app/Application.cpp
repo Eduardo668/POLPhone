@@ -393,6 +393,64 @@ util::Result<void> Application::setConsoleLogLevel(int level)
     return util::Result<void>::success();
 }
 
+util::Result<void> Application::setDtmfDefaultMethod(dtmf::DtmfMethod method)
+{
+    if (!initialized_ || dtmfSender_ == nullptr) {
+        return util::Result<void>::failure(
+            util::ErrorCode::Runtime,
+            "O serviço DTMF não está pronto; revise a inicialização.");
+    }
+    const auto changed = dtmfSender_->setDefaultMethod(method);
+    if (!changed) return changed;
+    dtmfMethod_ = std::string(dtmf::methodName(method));
+    static_cast<void>(logger_.info(
+        "dtmf", "Método padrão da sessão alterado para " + dtmfMethod_ + "."));
+    return util::Result<void>::success();
+}
+
+util::Result<void> Application::setDtmfDurationMs(int durationMs)
+{
+    if (!initialized_ || dtmfSender_ == nullptr) {
+        return util::Result<void>::failure(
+            util::ErrorCode::Runtime,
+            "O serviço DTMF não está pronto; revise a inicialização.");
+    }
+    const auto changed = dtmfSender_->setDurationMs(durationMs);
+    if (!changed) return changed;
+    static_cast<void>(logger_.info(
+        "dtmf", "Duração padrão alterada para " + std::to_string(durationMs) + " ms."));
+    return util::Result<void>::success();
+}
+
+util::Result<void> Application::setDtmfGapMs(int gapMs)
+{
+    if (!initialized_ || dtmfSender_ == nullptr) {
+        return util::Result<void>::failure(
+            util::ErrorCode::Runtime,
+            "O serviço DTMF não está pronto; revise a inicialização.");
+    }
+    const auto changed = dtmfSender_->setGapMs(gapMs);
+    if (!changed) return changed;
+    static_cast<void>(logger_.info(
+        "dtmf", "Intervalo padrão alterado para " + std::to_string(gapMs) + " ms."));
+    return util::Result<void>::success();
+}
+
+util::Result<void> Application::setDtmfVolumeDbm0(int volumeDbm0)
+{
+    if (!initialized_ || dtmfSender_ == nullptr) {
+        return util::Result<void>::failure(
+            util::ErrorCode::Runtime,
+            "O serviço DTMF não está pronto; revise a inicialização.");
+    }
+    const auto changed = dtmfSender_->setVolumeDbm0(volumeDbm0);
+    if (!changed) return changed;
+    static_cast<void>(logger_.info(
+        "dtmf", "Volume in-band padrão alterado para "
+            + std::to_string(volumeDbm0) + " dBm0."));
+    return util::Result<void>::success();
+}
+
 util::Result<dtmf::DtmfResult> Application::sendDtmf(
     std::string_view digits,
     std::optional<dtmf::DtmfMethod> method,

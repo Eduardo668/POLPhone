@@ -13,6 +13,7 @@
 #include "config/AppConfig.h"
 #include "dtmf/DtmfMethod.h"
 #include "dtmf/DtmfPlan.h"
+#include "dtmf/DtmfRequestGate.h"
 #include "logging/Logger.h"
 #include "util/Result.h"
 
@@ -85,6 +86,10 @@ public:
         const config::DtmfConfig& config,
         const config::AudioConfig& audio = config::AudioConfig{});
     [[nodiscard]] DtmfSettings settings() const;
+    [[nodiscard]] util::Result<void> setDefaultMethod(DtmfMethod method);
+    [[nodiscard]] util::Result<void> setDurationMs(int durationMs);
+    [[nodiscard]] util::Result<void> setGapMs(int gapMs);
+    [[nodiscard]] util::Result<void> setVolumeDbm0(int volumeDbm0);
     [[nodiscard]] util::Result<DtmfResult> send(const DtmfRequest& request);
     [[nodiscard]] bool inFlight() const noexcept;
 
@@ -103,8 +108,6 @@ private:
         bool active_{true};
     };
 
-    [[nodiscard]] util::Result<void> begin(std::string correlationId);
-    void finish() noexcept;
     [[nodiscard]] util::Result<sip::SipCall*> activeCall() const;
     [[nodiscard]] util::Result<int> telephoneEventPayloadType(sip::SipCall& call) const;
     [[nodiscard]] util::Result<void> sendRfc4733(
@@ -142,10 +145,9 @@ private:
     app::AppState& state_;
     app::EventQueue& events_;
     logging::Logger& logger_;
-    mutable std::mutex mutex_;
+    mutable std::mutex settingsMutex_;
     DtmfSettings settings_;
-    bool inFlight_{false};
-    std::string currentCorrelationId_;
+    DtmfRequestGate requestGate_;
     std::atomic<unsigned long long> sequence_{0U};
     unsigned audioClockRate_{8000U};
     unsigned audioChannelCount_{1U};
