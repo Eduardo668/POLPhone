@@ -10,6 +10,7 @@
 
 #include "util/Result.h"
 
+#include <atomic>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -102,6 +103,7 @@ public:
     [[nodiscard]] bool addSink(std::shared_ptr<LogSink> sink, LogLevel maxLevel) noexcept;
     [[nodiscard]] bool setSinkLevel(const std::shared_ptr<LogSink>& sink,
                                     LogLevel maxLevel) noexcept;
+    void setLogDtmfDigits(bool enabled) noexcept;
     util::Result<std::filesystem::path> enableFile(
         const std::filesystem::path& directory,
         LogLevel maxLevel,
@@ -131,6 +133,7 @@ private:
 
     mutable std::mutex sinksMutex_;
     std::vector<SinkRegistration> sinks_;
+    std::atomic<bool> logDtmfDigits_{false};
 };
 
 } // namespace polphone::logging

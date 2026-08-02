@@ -53,11 +53,12 @@ TEST_SUITE("parser") {
         REQUIRE(parsed);
         CHECK(parsed.value().verb == CommandVerb::Dtmf);
         CHECK(parsed.value().text == "12#");
-        CHECK(parsed.value().method == polphone::app::DtmfMethodArgument::SipInfo);
+        CHECK(parsed.value().method == polphone::dtmf::DtmfMethod::SipInfo);
         CHECK(parsed.value().durationMs == 250);
         CHECK(parsed.value().gapMs == 90);
 
         CHECK(CommandParser::parse("dtmfmode rfc4733"));
+        CHECK(CommandParser::parse("dtmfmode rfc2833"));
         CHECK(CommandParser::parse("dtmfcfg duration 160"));
         CHECK(CommandParser::parse("dtmfcfg gap 100"));
         CHECK(CommandParser::parse("dtmfcfg volume -10"));

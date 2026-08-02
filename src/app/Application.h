@@ -12,6 +12,7 @@
 #include "app/AppState.h"
 #include "app/EventQueue.h"
 #include "config/AppConfig.h"
+#include "dtmf/DtmfSender.h"
 #include "logging/Logger.h"
 #include "sip/CallRegistry.h"
 #include "sip/SipAccount.h"
@@ -68,6 +69,11 @@ public:
         int id);
     [[nodiscard]] util::Result<std::vector<sip::EffectiveCodec>> listCodecs();
     [[nodiscard]] util::Result<void> setConsoleLogLevel(int level);
+    [[nodiscard]] util::Result<dtmf::DtmfResult> sendDtmf(
+        std::string_view digits,
+        std::optional<dtmf::DtmfMethod> method,
+        std::optional<int> durationMs,
+        std::optional<int> gapMs);
     [[nodiscard]] ApplicationStatus status() const;
     [[nodiscard]] std::vector<UiEvent> drainEvents();
     [[nodiscard]] std::size_t reapCalls() noexcept;
@@ -89,6 +95,7 @@ private:
     // Deve ficar vivo enquanto SipAccount/SipCall guardarem sua referência.
     sip::CallRegistry calls_;
     std::unique_ptr<sip::SipAccount> account_;
+    std::unique_ptr<dtmf::DtmfSender> dtmfSender_;
     std::unique_ptr<ConsoleUi> console_;
     std::string dtmfMethod_;
     int consoleLogLevel_{0};

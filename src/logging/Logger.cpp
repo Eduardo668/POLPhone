@@ -344,6 +344,11 @@ bool Logger::setSinkLevel(
     return false;
 }
 
+void Logger::setLogDtmfDigits(bool enabled) noexcept
+{
+    logDtmfDigits_ = enabled;
+}
+
 util::Result<std::filesystem::path> Logger::enableFile(
     const std::filesystem::path& directory,
     LogLevel maxLevel,
@@ -382,10 +387,11 @@ bool Logger::log(LogLevel level,
         LogEntry entry;
         entry.timestamp = util::iso8601Now();
         entry.level = level;
-        entry.component = Redactor::redact(component);
-        entry.message = Redactor::redact(message);
-        entry.context = Redactor::redact(context);
-        entry.correlationId = Redactor::redact(correlationId);
+        const bool logDtmfDigits = logDtmfDigits_.load();
+        entry.component = Redactor::redact(component, logDtmfDigits);
+        entry.message = Redactor::redact(message, logDtmfDigits);
+        entry.context = Redactor::redact(context, logDtmfDigits);
+        entry.correlationId = Redactor::redact(correlationId, logDtmfDigits);
         const std::string formatted = formatLogEntry(entry);
 
         bool success = true;

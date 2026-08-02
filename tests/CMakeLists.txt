@@ -5,6 +5,7 @@ add_executable(polphone_tests
     test_command_parser.cpp
     test_config_loader.cpp
     test_config_validator.cpp
+    test_dtmf_plan.cpp
     test_pj_errors.cpp
     test_redactor.cpp
     test_sip_call.cpp
@@ -17,6 +18,7 @@ target_link_libraries(polphone_tests PRIVATE
     polphone_audio
     polphone_app
     polphone_config
+    polphone_dtmf
     polphone_logging
     polphone_pjsip_logging
     polphone_sip

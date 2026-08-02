@@ -63,15 +63,6 @@ std::optional<int> parseInteger(std::string_view text)
     return value;
 }
 
-std::optional<DtmfMethodArgument> parseMethod(std::string_view text)
-{
-    const std::string method = lowerAscii(text);
-    if (method == "rfc4733") return DtmfMethodArgument::Rfc4733;
-    if (method == "inband") return DtmfMethodArgument::Inband;
-    if (method == "info") return DtmfMethodArgument::SipInfo;
-    return std::nullopt;
-}
-
 bool isNoArgumentVerb(std::string_view verb, CommandVerb& parsed)
 {
     if (verb == "help") parsed = CommandVerb::Help;
@@ -86,16 +77,6 @@ bool isNoArgumentVerb(std::string_view verb, CommandVerb& parsed)
 }
 
 } // namespace
-
-std::string_view dtmfMethodName(DtmfMethodArgument method) noexcept
-{
-    switch (method) {
-    case DtmfMethodArgument::Rfc4733: return "rfc4733";
-    case DtmfMethodArgument::Inband: return "inband";
-    case DtmfMethodArgument::SipInfo: return "info";
-    }
-    return "unknown";
-}
 
 util::Result<Command> CommandParser::parse(std::string_view line)
 {
@@ -152,7 +133,7 @@ util::Result<Command> CommandParser::parse(std::string_view line)
             const std::string flag = lowerAscii(tokens[index]);
             if (flag == "--method") {
                 if (command.method.has_value()) return invalid("--method foi informado mais de uma vez.");
-                command.method = parseMethod(tokens[index + 1U]);
+                command.method = dtmf::parseMethod(tokens[index + 1U]);
                 if (!command.method.has_value()) {
                     return invalid(
                         "Método DTMF inválido; use rfc4733, inband ou info.",
@@ -181,7 +162,7 @@ util::Result<Command> CommandParser::parse(std::string_view line)
 
     if (verb == "dtmfmode") {
         if (tokens.size() != 2U) return invalid("Uso: dtmfmode rfc4733|inband|info.");
-        command.method = parseMethod(tokens[1]);
+        command.method = dtmf::parseMethod(tokens[1]);
         if (!command.method.has_value()) {
             return invalid(
                 "Método DTMF inválido; use rfc4733, inband ou info.", tokens[1]);

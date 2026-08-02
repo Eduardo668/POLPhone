@@ -81,6 +81,7 @@ util::Result<void> Application::initialize()
     }
     consoleLogLevel_ = consoleLevelNumber;
     dtmfMethod_ = config_->dtmf.defaultMethod;
+    logger_.setLogDtmfDigits(config_->dtmf.logDigits);
 
     const std::uintmax_t maxFileBytes =
         static_cast<std::uintmax_t>(config_->logging.maxFileMB) * 1024U * 1024U;
@@ -91,6 +92,11 @@ util::Result<void> Application::initialize()
     if (!logFile) {
         static_cast<void>(logger_.warning(
             "logging", "Arquivo de log indisponível; continuando somente no console."));
+    }
+    if (config_->dtmf.logDigits) {
+        static_cast<void>(logger_.warning(
+            "dtmf",
+            "dtmf.logDigits=true — dígitos serão gravados em claro no log. Não use com dados sensíveis."));
     }
     for (const auto& warning : warnings) {
         static_cast<void>(logger_.warning("config", warning));
@@ -161,6 +167,23 @@ util::Result<void> Application::initialize()
                 {}});
         }
         if (const auto result = account_->createFrom(config_->sip); !result) {
+            return failInitialization(result.error());
+        }
+        try {
+            dtmfSender_ = std::make_unique<dtmf::DtmfSender>(
+                calls_, state_, events_, logger_);
+        } catch (const std::exception& error) {
+            return failInitialization(util::Error{
+                util::ErrorCode::Runtime,
+                "Não foi possível reservar o serviço DTMF.",
+                error.what()});
+        } catch (...) {
+            return failInitialization(util::Error{
+                util::ErrorCode::Runtime,
+                "Falha desconhecida ao reservar o serviço DTMF.",
+                {}});
+        }
+        if (const auto result = dtmfSender_->configure(config_->dtmf); !result) {
             return failInitialization(result.error());
         }
         try {
@@ -349,6 +372,33 @@ util::Result<void> Application::setConsoleLogLevel(int level)
     return util::Result<void>::success();
 }
 
+util::Result<dtmf::DtmfResult> Application::sendDtmf(
+    std::string_view digits,
+    std::optional<dtmf::DtmfMethod> method,
+    std::optional<int> durationMs,
+    std::optional<int> gapMs)
+{
+    if (!initialized_ || dtmfSender_ == nullptr) {
+        return util::Result<dtmf::DtmfResult>::failure(
+            util::ErrorCode::Runtime,
+            "O serviço DTMF não está pronto; revise a inicialização.");
+    }
+    const dtmf::DtmfSettings settings = dtmfSender_->settings();
+    const int duration = durationMs.value_or(static_cast<int>(settings.durationMs));
+    const int gap = gapMs.value_or(static_cast<int>(settings.gapMs));
+    if (duration < 0 || gap < 0) {
+        return util::Result<dtmf::DtmfResult>::failure(
+            util::ErrorCode::InvalidArgument,
+            "Duração e intervalo DTMF não podem ser negativos.");
+    }
+    return dtmfSender_->send(dtmf::DtmfRequest{
+        std::string(digits),
+        method.value_or(settings.defaultMethod),
+        static_cast<unsigned>(duration),
+        static_cast<unsigned>(gap),
+        settings.volumeDbm0});
+}
+
 ApplicationStatus Application::status() const
 {
     ApplicationStatus snapshot;
@@ -359,7 +409,16 @@ ApplicationStatus Application::status() const
         snapshot.playbackDevice = audioDevices_->selectedPlayback();
     }
     if (config_.has_value()) snapshot.dtmf = config_->dtmf;
-    snapshot.dtmfMethod = dtmfMethod_;
+    if (dtmfSender_ != nullptr) {
+        const auto settings = dtmfSender_->settings();
+        snapshot.dtmf.defaultMethod = std::string(dtmf::methodName(settings.defaultMethod));
+        snapshot.dtmf.durationMs = static_cast<int>(settings.durationMs);
+        snapshot.dtmf.gapMs = static_cast<int>(settings.gapMs);
+        snapshot.dtmf.volumeDbm0 = settings.volumeDbm0;
+        snapshot.dtmfMethod = std::string(dtmf::methodName(settings.defaultMethod));
+    } else {
+        snapshot.dtmfMethod = dtmfMethod_;
+    }
     snapshot.consoleLogLevel = consoleLogLevel_;
     return snapshot;
 }
@@ -380,6 +439,7 @@ void Application::shutdown() noexcept
     shutdownStarted_ = true;
     initialized_ = false;
     console_.reset();
+    dtmfSender_.reset();
 
     if (sip::SipCall* call = calls_.current(); call != nullptr) {
         const auto hungUp = call->hangupCall();

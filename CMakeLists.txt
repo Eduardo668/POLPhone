@@ -155,6 +155,30 @@ target_compile_options(polphone_audio PRIVATE
     $<$<CONFIG:Release>:/O2;/Zi>
 )
 
+add_library(polphone_dtmf STATIC
+    src/dtmf/DtmfPlan.cpp
+    src/dtmf/DtmfSender.cpp
+)
+target_include_directories(polphone_dtmf PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_compile_definitions(polphone_dtmf PRIVATE
+    WIN32_LEAN_AND_MEAN
+    NOMINMAX
+    _CRT_SECURE_NO_WARNINGS
+    _WINSOCK_DEPRECATED_NO_WARNINGS
+    UNICODE
+    _UNICODE
+    PJ_WIN32=1
+    PJ_M_X86_64=1
+)
+target_link_libraries(polphone_dtmf
+    PUBLIC PJSIP::pjsua2 polphone_config polphone_logging polphone_sip polphone_state polphone_util
+    PRIVATE polphone_warnings
+)
+target_compile_options(polphone_dtmf PRIVATE
+    $<$<CONFIG:Debug>:/Zi;/Od;/RTC1>
+    $<$<CONFIG:Release>:/O2;/Zi>
+)
+
 add_library(polphone_app STATIC
     src/app/Application.cpp
     src/app/CommandParser.cpp
@@ -173,7 +197,7 @@ target_compile_definitions(polphone_app PRIVATE
     PJ_M_X86_64=1
 )
 target_link_libraries(polphone_app
-    PUBLIC polphone_audio polphone_config polphone_logging polphone_sip polphone_state
+    PUBLIC polphone_audio polphone_config polphone_dtmf polphone_logging polphone_sip polphone_state
     PRIVATE polphone_warnings
 )
 target_compile_options(polphone_app PRIVATE
@@ -198,6 +222,7 @@ target_link_libraries(polphone PRIVATE
     polphone_util
     polphone_config
     polphone_logging
+    polphone_dtmf
     polphone_pjsip_logging
     polphone_sip
     polphone_audio

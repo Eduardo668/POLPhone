@@ -280,6 +280,20 @@ TEST_SUITE("redactor") {
         CHECK_FALSE(logger.setSinkLevel(std::make_shared<MemorySink>(), LogLevel::Trace));
     }
 
+    TEST_CASE("Logger só preserva dígitos DTMF após opt-in explícito")
+    {
+        Logger logger;
+        auto memory = std::make_shared<MemorySink>();
+        REQUIRE(logger.addSink(memory, LogLevel::Info));
+        CHECK(logger.info("dtmf", "digit=7"));
+        logger.setLogDtmfDigits(true);
+        CHECK(logger.info("dtmf", "digit=8"));
+        const auto lines = memory->lines();
+        REQUIRE(lines.size() == 2U);
+        CHECK(lines[0].find("digit=*") != std::string::npos);
+        CHECK(lines[1].find("digit=8") != std::string::npos);
+    }
+
     TEST_CASE("arquivo temporário recebe somente conteúdo sanitizado")
     {
         TemporaryPath temporary;

@@ -265,10 +265,16 @@ ConsoleUi::DispatchResult ConsoleUi::dispatch(const Command& command)
         result = application_.hangupCall();
         if (result) output_ << "Encerramento solicitado.\n";
         break;
-    case CommandVerb::Dtmf:
+    case CommandVerb::Dtmf: {
+        const auto sent = application_.sendDtmf(
+            command.text, command.method, command.durationMs, command.gapMs);
+        if (!sent) printError(sent.error());
+        else output_ << sent.value().summary << '\n';
+        break;
+    }
     case CommandVerb::DtmfMode:
     case CommandVerb::DtmfConfig:
-        output_ << "Comando reconhecido; execução DTMF será habilitada nas etapas 13–16.\n";
+        output_ << "Comando reconhecido; configuração DTMF em runtime será habilitada na etapa 16.\n";
         break;
     case CommandVerb::Codecs:
         printCodecs();

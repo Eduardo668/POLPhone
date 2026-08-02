@@ -8,6 +8,7 @@
 
 #pragma once
 
+#include "dtmf/DtmfMethod.h"
 #include "util/Result.h"
 
 #include <optional>
@@ -38,12 +39,6 @@ enum class DeviceDirection {
     Playback
 };
 
-enum class DtmfMethodArgument {
-    Rfc4733,
-    Inband,
-    SipInfo
-};
-
 enum class DtmfConfigField {
     Duration,
     Gap,
@@ -56,7 +51,7 @@ struct Command {
     std::optional<int> value;
     std::optional<DeviceDirection> deviceDirection;
     std::optional<bool> enabled;
-    std::optional<DtmfMethodArgument> method;
+    std::optional<dtmf::DtmfMethod> method;
     std::optional<DtmfConfigField> dtmfField;
     std::optional<int> durationMs;
     std::optional<int> gapMs;
@@ -66,7 +61,5 @@ class CommandParser final {
 public:
     [[nodiscard]] static util::Result<Command> parse(std::string_view line);
 };
-
-[[nodiscard]] std::string_view dtmfMethodName(DtmfMethodArgument method) noexcept;
 
 } // namespace polphone::app
