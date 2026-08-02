@@ -101,6 +101,18 @@ app::CallState callStateFromPjsip(pjsip_inv_state state) noexcept
     }
 }
 
+std::string_view callMediaStatusName(pjsua_call_media_status status) noexcept
+{
+    switch (status) {
+    case PJSUA_CALL_MEDIA_NONE: return "NONE";
+    case PJSUA_CALL_MEDIA_ACTIVE: return "ACTIVE";
+    case PJSUA_CALL_MEDIA_LOCAL_HOLD: return "LOCAL_HOLD";
+    case PJSUA_CALL_MEDIA_REMOTE_HOLD: return "REMOTE_HOLD";
+    case PJSUA_CALL_MEDIA_ERROR: return "ERROR";
+    }
+    return "UNKNOWN";
+}
+
 SipCall::SipCall(pj::Account& account,
                  CallRegistry& registry,
                  app::AppState& state,
@@ -123,6 +135,7 @@ SipCall::SipCall(pj::Account& account,
 
 SipCall::~SipCall()
 {
+    disconnectAudio();
     --liveCount_;
     try {
         static_cast<void>(logger_.debug(
@@ -155,6 +168,22 @@ util::Result<void> SipCall::hangupCall()
     return POLPHONE_PJ_TRY(hangup(parameter));
 }
 
+std::optional<pj::AudioMedia> SipCall::audioMedia() const
+{
+    std::lock_guard<std::mutex> lock(mediaMutex_);
+    return audioMedia_;
+}
+
+int SipCall::audioConfSlot() const noexcept
+{
+    return audioConfSlot_.load();
+}
+
+bool SipCall::hasActiveAudio() const noexcept
+{
+    return audioConnected_.load();
+}
+
 bool SipCall::canReap() const noexcept
 {
     return callbackDepth_.load() == 0U;
@@ -184,6 +213,7 @@ void SipCall::onCallState(pj::OnCallStateParam&) noexcept
     try {
         const pj::CallInfo information = getInfo();
         disconnected = information.state == PJSIP_INV_STATE_DISCONNECTED;
+        if (disconnected) disconnectAudio();
         const auto state = callStateFromPjsip(information.state);
         state_.updateCall(app::CallSnapshot{
             state,
@@ -232,6 +262,197 @@ void SipCall::onCallTsxState(pj::OnCallTsxStateParam& parameter) noexcept
         publishCallbackFailure("onCallTsxState", error.what());
     } catch (...) {
         publishCallbackFailure("onCallTsxState", "exceção desconhecida");
+    }
+}
+
+void SipCall::onCallMediaState(pj::OnCallMediaStateParam&) noexcept
+{
+    CallbackScope callback(*this);
+    try {
+        const pj::CallInfo information = getInfo();
+        bool foundAudio = false;
+        for (const auto& media : information.media) {
+            if (media.type != PJMEDIA_TYPE_AUDIO) continue;
+            foundAudio = true;
+            static_cast<void>(logger_.info(
+                "media",
+                "Mídia de áudio index=" + std::to_string(media.index)
+                    + " status=" + std::string(callMediaStatusName(media.status))
+                    + " slot=" + std::to_string(media.audioConfSlot) + "."));
+
+            switch (media.status) {
+            case PJSUA_CALL_MEDIA_ACTIVE: {
+                const auto connected = connectAudio(media.index);
+                if (!connected) {
+                    publishMediaFailure(connected.error().message, connected.error().detail);
+                }
+                break;
+            }
+            case PJSUA_CALL_MEDIA_LOCAL_HOLD:
+            case PJSUA_CALL_MEDIA_REMOTE_HOLD: {
+                disconnectAudio(true);
+                const auto heldMedia = POLPHONE_PJ_TRY(getAudioMedia(media.index));
+                if (heldMedia) {
+                    std::lock_guard<std::mutex> lock(mediaMutex_);
+                    audioMedia_ = heldMedia.value();
+                    audioConfSlot_ = heldMedia.value().getPortId();
+                } else {
+                    publishMediaFailure(
+                        "Não foi possível preservar a mídia durante hold.",
+                        heldMedia.error().detail);
+                }
+                break;
+            }
+            case PJSUA_CALL_MEDIA_ERROR:
+                disconnectAudio();
+                publishMediaFailure(
+                    "A negociação de mídia falhou; a chamada continuará sinalizada.",
+                    "mediaIndex=" + std::to_string(media.index));
+                break;
+            case PJSUA_CALL_MEDIA_NONE:
+                disconnectAudio();
+                break;
+            }
+        }
+        if (!foundAudio) {
+            disconnectAudio();
+            static_cast<void>(logger_.info(
+                "media", "A chamada não possui fluxo de áudio negociado."));
+        }
+    } catch (const pj::Error& error) {
+        publishCallbackFailure("onCallMediaState", describe(error));
+    } catch (const std::exception& error) {
+        publishCallbackFailure("onCallMediaState", error.what());
+    } catch (...) {
+        publishCallbackFailure("onCallMediaState", "exceção desconhecida");
+    }
+}
+
+util::Result<void> SipCall::connectAudio(unsigned mediaIndex)
+{
+    disconnectAudio();
+    bool receiveConnected = false;
+    try {
+        pj::AudioMedia callMedia = getAudioMedia(static_cast<int>(mediaIndex));
+        pj::AudDevManager& manager = pj::Endpoint::instance().audDevManager();
+        pj::AudioMedia& playback = manager.getPlaybackDevMedia();
+        pj::AudioMedia& capture = manager.getCaptureDevMedia();
+
+        {
+            std::lock_guard<std::mutex> lock(mediaMutex_);
+            audioMedia_ = callMedia;
+            audioConfSlot_ = callMedia.getPortId();
+        }
+        callMedia.startTransmit(playback);
+        receiveConnected = true;
+        capture.startTransmit(callMedia);
+        audioConnected_ = true;
+
+        try {
+            const pj::StreamInfo stream = getStreamInfo(mediaIndex);
+            const pj::MediaTransportInfo transport = getMedTransportInfo(mediaIndex);
+            static_cast<void>(logger_.info(
+                "media",
+                "Áudio bidirecional conectado: codec=" + stream.codecName + "/"
+                    + std::to_string(stream.codecClockRate)
+                    + " localRtp=" + transport.localRtpName
+                    + " remoteRtp=" + stream.remoteRtpAddress
+                    + " slot=" + std::to_string(callMedia.getPortId()) + "."));
+            static_cast<void>(events_.push(app::UiEvent{
+                app::UiEventSeverity::Info,
+                "media",
+                "Áudio ativo: " + stream.codecName + "/"
+                    + std::to_string(stream.codecClockRate) + "."}));
+        } catch (const pj::Error& error) {
+            static_cast<void>(logger_.warning(
+                "media",
+                "Áudio conectado, mas os detalhes de codec/RTP não puderam ser lidos: "
+                    + describe(error)));
+        } catch (...) {
+            static_cast<void>(logger_.warning(
+                "media", "Áudio conectado, mas o diagnóstico de codec/RTP falhou."));
+        }
+        return util::Result<void>::success();
+    } catch (const pj::Error& error) {
+        if (receiveConnected) {
+            try {
+                std::optional<pj::AudioMedia> media;
+                {
+                    std::lock_guard<std::mutex> lock(mediaMutex_);
+                    media = audioMedia_;
+                }
+                if (media.has_value()) {
+                    media->stopTransmit(
+                        pj::Endpoint::instance().audDevManager().getPlaybackDevMedia());
+                }
+            } catch (...) {
+            }
+        }
+        disconnectAudio();
+        return util::Result<void>::failure(makePjError(error, "conectar áudio da chamada"));
+    } catch (const std::exception& error) {
+        disconnectAudio();
+        return util::Result<void>::failure(
+            util::ErrorCode::Runtime,
+            "Falha inesperada ao conectar o áudio da chamada.",
+            error.what());
+    } catch (...) {
+        disconnectAudio();
+        return util::Result<void>::failure(
+            util::ErrorCode::Runtime,
+            "Falha desconhecida ao conectar o áudio da chamada.");
+    }
+}
+
+void SipCall::disconnectAudio(bool retainMedia) noexcept
+{
+    try {
+        std::optional<pj::AudioMedia> media;
+        {
+            std::lock_guard<std::mutex> lock(mediaMutex_);
+            media = audioMedia_;
+        }
+        if (media.has_value() && audioConnected_.load()) {
+            pj::AudDevManager& manager = pj::Endpoint::instance().audDevManager();
+            try {
+                media->stopTransmit(manager.getPlaybackDevMedia());
+            } catch (const pj::Error& error) {
+                static_cast<void>(logger_.warning(
+                    "media", "Falha ao desconectar reprodução: " + describe(error)));
+            }
+            try {
+                manager.getCaptureDevMedia().stopTransmit(*media);
+            } catch (const pj::Error& error) {
+                static_cast<void>(logger_.warning(
+                    "media", "Falha ao desconectar captura: " + describe(error)));
+            }
+        }
+        audioConnected_ = false;
+        if (!retainMedia) {
+            std::lock_guard<std::mutex> lock(mediaMutex_);
+            audioMedia_.reset();
+            audioConfSlot_ = PJSUA_INVALID_ID;
+        }
+    } catch (...) {
+        audioConnected_ = false;
+        if (!retainMedia) audioConfSlot_ = PJSUA_INVALID_ID;
+    }
+}
+
+void SipCall::publishMediaFailure(
+    std::string_view message,
+    std::string_view detail) noexcept
+{
+    try {
+        static_cast<void>(logger_.error(
+            "media", std::string(message) + " " + std::string(detail)));
+        static_cast<void>(events_.push(app::UiEvent{
+            app::UiEventSeverity::Error,
+            "media",
+            std::string(message)}));
+    } catch (...) {
+        static_cast<void>(logger_.error(
+            "media", "Falha de mídia sem memória para diagnóstico detalhado."));
     }
 }
 

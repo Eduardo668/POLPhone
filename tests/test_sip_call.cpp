@@ -57,4 +57,15 @@ TEST_SUITE("call") {
         CHECK(polphone::sip::callStateFromPjsip(PJSIP_INV_STATE_NULL)
               == polphone::app::CallState::Idle);
     }
+
+    TEST_CASE("nomeia todos os estados de mídia tratados")
+    {
+        CHECK(polphone::sip::callMediaStatusName(PJSUA_CALL_MEDIA_NONE) == "NONE");
+        CHECK(polphone::sip::callMediaStatusName(PJSUA_CALL_MEDIA_ACTIVE) == "ACTIVE");
+        CHECK(polphone::sip::callMediaStatusName(PJSUA_CALL_MEDIA_LOCAL_HOLD)
+              == "LOCAL_HOLD");
+        CHECK(polphone::sip::callMediaStatusName(PJSUA_CALL_MEDIA_REMOTE_HOLD)
+              == "REMOTE_HOLD");
+        CHECK(polphone::sip::callMediaStatusName(PJSUA_CALL_MEDIA_ERROR) == "ERROR");
+    }
 }

@@ -18,6 +18,8 @@
 
 #include <atomic>
 #include <cstddef>
+#include <mutex>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -29,6 +31,8 @@ class CallRegistry;
     std::string_view destination,
     std::string_view domain);
 [[nodiscard]] app::CallState callStateFromPjsip(pjsip_inv_state state) noexcept;
+[[nodiscard]] std::string_view callMediaStatusName(
+    pjsua_call_media_status status) noexcept;
 
 class SipCall final : public pj::Call {
 public:
@@ -48,9 +52,13 @@ public:
     [[nodiscard]] util::Result<void> hangupCall();
     [[nodiscard]] bool canReap() const noexcept;
     [[nodiscard]] static std::size_t liveCount() noexcept;
+    [[nodiscard]] std::optional<pj::AudioMedia> audioMedia() const;
+    [[nodiscard]] int audioConfSlot() const noexcept;
+    [[nodiscard]] bool hasActiveAudio() const noexcept;
 
     void onCallState(pj::OnCallStateParam& parameter) noexcept override;
     void onCallTsxState(pj::OnCallTsxStateParam& parameter) noexcept override;
+    void onCallMediaState(pj::OnCallMediaStateParam& parameter) noexcept override;
 
 private:
     class CallbackScope final {
@@ -64,12 +72,20 @@ private:
 
     void publishCallbackFailure(std::string_view callback,
                                 std::string_view detail) noexcept;
+    [[nodiscard]] util::Result<void> connectAudio(unsigned mediaIndex);
+    void disconnectAudio(bool retainMedia = false) noexcept;
+    void publishMediaFailure(std::string_view message,
+                             std::string_view detail = {}) noexcept;
 
     CallRegistry& registry_;
     app::AppState& state_;
     app::EventQueue& events_;
     logging::Logger& logger_;
     std::string destinationUri_;
+    mutable std::mutex mediaMutex_;
+    std::optional<pj::AudioMedia> audioMedia_;
+    std::atomic<int> audioConfSlot_{PJSUA_INVALID_ID};
+    std::atomic<bool> audioConnected_{false};
     std::atomic<unsigned> callbackDepth_{0U};
     static std::atomic<std::size_t> liveCount_;
 };
