@@ -326,6 +326,24 @@ bool Logger::addSink(std::shared_ptr<LogSink> sink, LogLevel maxLevel) noexcept
     }
 }
 
+bool Logger::setSinkLevel(
+    const std::shared_ptr<LogSink>& sink,
+    LogLevel maxLevel) noexcept
+{
+    if (!sink) return false;
+    try {
+        std::lock_guard<std::mutex> lock(sinksMutex_);
+        for (auto& registration : sinks_) {
+            if (registration.sink == sink) {
+                registration.maxLevel = maxLevel;
+                return true;
+            }
+        }
+    } catch (...) {
+    }
+    return false;
+}
+
 util::Result<std::filesystem::path> Logger::enableFile(
     const std::filesystem::path& directory,
     LogLevel maxLevel,

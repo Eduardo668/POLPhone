@@ -2,7 +2,7 @@
 
 POLPhone é uma prova técnica de softphone SIP para Windows x64, escrita em C++17 sobre PJSIP/PJSUA2 2.17. O MVP é operado por console e existe para comparar, de forma explícita e auditável, métodos de DTMF em chamadas SIP.
 
-O repositório já contém o build reproduzível do pjproject, utilitários base, testes unitários, logging estruturado com redaction, configuração JSON, ciclo de vida completo do endpoint, transporte SIP UDP, seleção dos dispositivos de áudio WMME, registro de uma conta SIP e chamadas com áudio bidirecional. O console interativo e DTMF ainda estão em desenvolvimento.
+O repositório já contém o build reproduzível do pjproject, utilitários base, testes unitários, logging estruturado com redaction, configuração JSON, ciclo de vida completo do endpoint, transporte SIP UDP, seleção dos dispositivos de áudio WMME, registro de uma conta SIP, chamadas com áudio bidirecional e console interativo. Os métodos DTMF ainda estão em desenvolvimento.
 
 ## Funcionalidades disponíveis
 
@@ -14,6 +14,8 @@ O repositório já contém o build reproduzível do pjproject, utilitários base
 - chamada de saída e entrada única, com normalização estrita do destino, estados SIP e desligamento;
 - áudio bidirecional pela conference bridge, com tratamento de hold/erro e log do codec/RTP;
 - destruição diferida de chamadas fora das callbacks PJSIP;
+- console com prompt de estado e comandos de registro, chamada, áudio, codecs e log;
+- encerramento gracioso por `quit` ou `Ctrl+C` (código 130 para interrupção);
 - configuração JSON com defaults, validação semântica e diagnóstico por campo;
 - logging em console e arquivo, com níveis independentes e rotação;
 - mascaramento de credenciais, autenticação SIP e números externos nos logs;
@@ -90,6 +92,16 @@ Para validar somente o bootstrap e a configuração, sem registrar uma conta SIP
 ```powershell
 .\build\Release\polphone.exe --config .\config\polphone.config.json --selftest
 ```
+
+Para iniciar o console operacional:
+
+```powershell
+.\build\Release\polphone.exe --config .\config\polphone.config.json
+```
+
+Use `help` para listar todos os comandos. O fluxo básico é `status`, `call <destino>`, `answer`,
+`hangup` e `quit`. Os comandos `dtmf`, `dtmfmode` e `dtmfcfg` já são reconhecidos pelo parser, mas
+só serão executados após a implementação das três modalidades de DTMF.
 
 Para listar os dispositivos sem exigir um arquivo de configuração local:
 

@@ -100,6 +100,8 @@ public:
     Logger& operator=(const Logger&) = delete;
 
     [[nodiscard]] bool addSink(std::shared_ptr<LogSink> sink, LogLevel maxLevel) noexcept;
+    [[nodiscard]] bool setSinkLevel(const std::shared_ptr<LogSink>& sink,
+                                    LogLevel maxLevel) noexcept;
     util::Result<std::filesystem::path> enableFile(
         const std::filesystem::path& directory,
         LogLevel maxLevel,

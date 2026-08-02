@@ -25,6 +25,20 @@ std::string_view registrationStateName(RegistrationState state) noexcept
     return "UNKNOWN";
 }
 
+std::string_view callStateName(CallState state) noexcept
+{
+    switch (state) {
+    case CallState::Idle: return "IDLE";
+    case CallState::Incoming: return "INCOMING";
+    case CallState::Calling: return "CALLING";
+    case CallState::Early: return "EARLY";
+    case CallState::Connecting: return "CONNECTING";
+    case CallState::Confirmed: return "CONFIRMED";
+    case CallState::Disconnected: return "DISCONNECTED";
+    }
+    return "UNKNOWN";
+}
+
 void AppState::updateRegistration(RegistrationSnapshot snapshot)
 {
     std::lock_guard<std::mutex> lock(mutex_);

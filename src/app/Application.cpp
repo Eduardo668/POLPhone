@@ -8,6 +8,7 @@
 
 #include "app/Application.h"
 
+#include "app/ConsoleUi.h"
 #include "config/ConfigLoader.h"
 #include "config/ConfigValidator.h"
 #include "logging/Logger.h"
@@ -63,14 +64,23 @@ util::Result<void> Application::initialize()
 
     const int consoleLevelNumber =
         options_.consoleLogLevel.value_or(config_->logging.consoleLevel);
+    try {
+        consoleSink_ = std::make_shared<logging::ConsoleLogSink>(std::cout);
+    } catch (...) {
+        return failInitialization(util::Error{
+            util::ErrorCode::Runtime,
+            "Falha ao reservar o console de log; libere memória e tente novamente.",
+            {}});
+    }
     if (!logger_.addSink(
-            std::make_shared<logging::ConsoleLogSink>(std::cout),
-            logging::logLevelFromNumber(consoleLevelNumber))) {
+            consoleSink_, logging::logLevelFromNumber(consoleLevelNumber))) {
         return failInitialization(util::Error{
             util::ErrorCode::Runtime,
             "Falha ao inicializar o console de log; verifique a saída padrão.",
             "Logger::addSink"});
     }
+    consoleLogLevel_ = consoleLevelNumber;
+    dtmfMethod_ = config_->dtmf.defaultMethod;
 
     const std::uintmax_t maxFileBytes =
         static_cast<std::uintmax_t>(config_->logging.maxFileMB) * 1024U * 1024U;
@@ -153,6 +163,20 @@ util::Result<void> Application::initialize()
         if (const auto result = account_->createFrom(config_->sip); !result) {
             return failInitialization(result.error());
         }
+        try {
+            console_ = std::make_unique<ConsoleUi>(
+                *this, std::cin, std::cout, std::cerr);
+        } catch (const std::exception& error) {
+            return failInitialization(util::Error{
+                util::ErrorCode::Runtime,
+                "Não foi possível reservar o console interativo.",
+                error.what()});
+        } catch (...) {
+            return failInitialization(util::Error{
+                util::ErrorCode::Runtime,
+                "Falha desconhecida ao reservar o console interativo.",
+                {}});
+        }
     }
 
     initialized_ = true;
@@ -191,6 +215,7 @@ int Application::run()
         static_cast<void>(logger_.info(
             "app", "Selftest do endpoint, transporte e codecs concluído com sucesso."));
     }
+    if (console_ != nullptr) return console_->run();
     static_cast<void>(calls_.reap());
     for (const auto& event : events_.drain()) {
         const auto level = event.severity == UiEventSeverity::Error
@@ -262,11 +287,99 @@ util::Result<void> Application::hangupCall()
     return call->hangupCall();
 }
 
+util::Result<void> Application::setRegistrationEnabled(bool enabled)
+{
+    if (!initialized_ || account_ == nullptr) {
+        return util::Result<void>::failure(
+            util::ErrorCode::Runtime,
+            "A conta SIP não está pronta; revise a inicialização.");
+    }
+    return account_->setRegistrationEnabled(enabled);
+}
+
+util::Result<std::vector<audio::AudioDeviceDescription>>
+Application::listAudioDevices() const
+{
+    if (!initialized_ || audioDevices_ == nullptr) {
+        return util::Result<std::vector<audio::AudioDeviceDescription>>::failure(
+            util::ErrorCode::Runtime,
+            "O serviço de áudio não está pronto; revise a inicialização.");
+    }
+    return audioDevices_->list();
+}
+
+util::Result<void> Application::selectAudioDevice(
+    audio::AudioDeviceDirection direction,
+    int id)
+{
+    if (!initialized_ || audioDevices_ == nullptr) {
+        return util::Result<void>::failure(
+            util::ErrorCode::Runtime,
+            "O serviço de áudio não está pronto; revise a inicialização.");
+    }
+    const bool callActive = calls_.hasActiveCall();
+    return direction == audio::AudioDeviceDirection::Capture
+        ? audioDevices_->selectCapture(id, callActive)
+        : audioDevices_->selectPlayback(id, callActive);
+}
+
+util::Result<std::vector<sip::EffectiveCodec>> Application::listCodecs()
+{
+    if (!initialized_ || endpoint_ == nullptr) {
+        return util::Result<std::vector<sip::EffectiveCodec>>::failure(
+            util::ErrorCode::Runtime,
+            "O endpoint SIP não está pronto; revise a inicialização.");
+    }
+    return endpoint_->listCodecs();
+}
+
+util::Result<void> Application::setConsoleLogLevel(int level)
+{
+    if (level < 0 || level > 6) {
+        return util::Result<void>::failure(
+            util::ErrorCode::InvalidArgument,
+            "O nível de log deve estar entre 0 e 6.");
+    }
+    if (!logger_.setSinkLevel(consoleSink_, logging::logLevelFromNumber(level))) {
+        return util::Result<void>::failure(
+            util::ErrorCode::Runtime,
+            "Não foi possível alterar o nível do console de log.");
+    }
+    consoleLogLevel_ = level;
+    return util::Result<void>::success();
+}
+
+ApplicationStatus Application::status() const
+{
+    ApplicationStatus snapshot;
+    snapshot.registration = state_.registration();
+    snapshot.call = state_.call();
+    if (audioDevices_ != nullptr) {
+        snapshot.captureDevice = audioDevices_->selectedCapture();
+        snapshot.playbackDevice = audioDevices_->selectedPlayback();
+    }
+    if (config_.has_value()) snapshot.dtmf = config_->dtmf;
+    snapshot.dtmfMethod = dtmfMethod_;
+    snapshot.consoleLogLevel = consoleLogLevel_;
+    return snapshot;
+}
+
+std::vector<UiEvent> Application::drainEvents()
+{
+    return events_.drain();
+}
+
+std::size_t Application::reapCalls() noexcept
+{
+    return calls_.reap();
+}
+
 void Application::shutdown() noexcept
 {
     if (shutdownStarted_) return;
     shutdownStarted_ = true;
     initialized_ = false;
+    console_.reset();
 
     if (sip::SipCall* call = calls_.current(); call != nullptr) {
         const auto hungUp = call->hangupCall();
@@ -318,6 +431,7 @@ void Application::shutdown() noexcept
         endpoint_.reset();
     }
     config_.reset();
+    consoleSink_.reset();
     if (!logger_.flush()) {
         std::cerr << "Aviso [LOG_FLUSH]: não foi possível descarregar todos os logs.\n";
     }

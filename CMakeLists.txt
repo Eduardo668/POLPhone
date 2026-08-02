@@ -157,11 +157,14 @@ target_compile_options(polphone_audio PRIVATE
 
 add_library(polphone_app STATIC
     src/app/Application.cpp
+    src/app/CommandParser.cpp
+    src/app/ConsoleUi.cpp
 )
 target_include_directories(polphone_app PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_compile_definitions(polphone_app PRIVATE
     WIN32_LEAN_AND_MEAN
     NOMINMAX
+    _WIN32_WINNT=0x0A00
     _CRT_SECURE_NO_WARNINGS
     _WINSOCK_DEPRECATED_NO_WARNINGS
     UNICODE

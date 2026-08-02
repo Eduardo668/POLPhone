@@ -61,6 +61,7 @@ TEST_SUITE("registration") {
         CHECK(snapshot.remoteUri == "sip:1002@pbx.local");
         snapshot.remoteUri.clear();
         CHECK_FALSE(state.call().remoteUri.empty());
+        CHECK(polphone::app::callStateName(snapshot.state) == "CONFIRMED");
     }
 
     TEST_CASE("traduz respostas de registro obrigatórias")

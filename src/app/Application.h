@@ -21,9 +21,13 @@
 #include <filesystem>
 #include <memory>
 #include <optional>
+#include <string>
 #include <string_view>
+#include <vector>
 
 namespace polphone::app {
+
+class ConsoleUi;
 
 struct ApplicationOptions {
     std::filesystem::path configPath{"config/polphone.config.json"};
@@ -31,6 +35,16 @@ struct ApplicationOptions {
     bool selftest{false};
     bool listDevices{false};
     bool useBuiltInConfig{false};
+};
+
+struct ApplicationStatus {
+    RegistrationSnapshot registration;
+    CallSnapshot call;
+    std::optional<int> captureDevice;
+    std::optional<int> playbackDevice;
+    config::DtmfConfig dtmf;
+    std::string dtmfMethod;
+    int consoleLogLevel{0};
 };
 
 class Application final {
@@ -46,6 +60,17 @@ public:
     [[nodiscard]] util::Result<void> makeCall(std::string_view destination);
     [[nodiscard]] util::Result<void> answerCall();
     [[nodiscard]] util::Result<void> hangupCall();
+    [[nodiscard]] util::Result<void> setRegistrationEnabled(bool enabled);
+    [[nodiscard]] util::Result<std::vector<audio::AudioDeviceDescription>>
+        listAudioDevices() const;
+    [[nodiscard]] util::Result<void> selectAudioDevice(
+        audio::AudioDeviceDirection direction,
+        int id);
+    [[nodiscard]] util::Result<std::vector<sip::EffectiveCodec>> listCodecs();
+    [[nodiscard]] util::Result<void> setConsoleLogLevel(int level);
+    [[nodiscard]] ApplicationStatus status() const;
+    [[nodiscard]] std::vector<UiEvent> drainEvents();
+    [[nodiscard]] std::size_t reapCalls() noexcept;
     void shutdown() noexcept;
 
 private:
@@ -55,6 +80,7 @@ private:
     // A ordem dos membros é a ordem de construção. O logger precisa viver
     // antes e depois do endpoint, que referencia seus sinks no PjLogWriter.
     logging::Logger logger_;
+    std::shared_ptr<logging::LogSink> consoleSink_;
     AppState state_;
     EventQueue events_;
     std::optional<config::AppConfig> config_;
@@ -63,6 +89,9 @@ private:
     // Deve ficar vivo enquanto SipAccount/SipCall guardarem sua referência.
     sip::CallRegistry calls_;
     std::unique_ptr<sip::SipAccount> account_;
+    std::unique_ptr<ConsoleUi> console_;
+    std::string dtmfMethod_;
+    int consoleLogLevel_{0};
     bool initialized_{false};
     bool shutdownStarted_{false};
 };

@@ -34,6 +34,7 @@ enum class CallState {
 };
 
 [[nodiscard]] std::string_view registrationStateName(RegistrationState state) noexcept;
+[[nodiscard]] std::string_view callStateName(CallState state) noexcept;
 
 struct RegistrationSnapshot {
     RegistrationState state{RegistrationState::Unconfigured};

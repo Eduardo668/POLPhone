@@ -196,6 +196,38 @@ util::Result<void> SipEndpoint::applyCodecPriorities(const config::CodecsConfig&
     return util::Result<void>::success();
 }
 
+util::Result<std::vector<EffectiveCodec>> SipEndpoint::listCodecs()
+{
+    if (state_ != State::Started || endpoint_ == nullptr) {
+        const auto invalid = invalidState("listCodecs");
+        return util::Result<std::vector<EffectiveCodec>>::failure(invalid.error());
+    }
+    const auto codecs = POLPHONE_PJ_TRY(endpoint_->codecEnum2());
+    if (!codecs) {
+        return util::Result<std::vector<EffectiveCodec>>::failure(codecs.error());
+    }
+    try {
+        std::vector<EffectiveCodec> result;
+        result.reserve(codecs.value().size());
+        for (const auto& codec : codecs.value()) {
+            result.push_back(EffectiveCodec{
+                codec.codecId,
+                static_cast<unsigned>(codec.priority),
+                codec.desc});
+        }
+        return util::Result<std::vector<EffectiveCodec>>::success(std::move(result));
+    } catch (const std::exception& error) {
+        return util::Result<std::vector<EffectiveCodec>>::failure(
+            util::ErrorCode::Runtime,
+            "Não foi possível montar a lista de codecs.",
+            error.what());
+    } catch (...) {
+        return util::Result<std::vector<EffectiveCodec>>::failure(
+            util::ErrorCode::Runtime,
+            "Falha desconhecida ao montar a lista de codecs.");
+    }
+}
+
 util::Result<void> SipEndpoint::registerThisThread(std::string_view name)
 {
     if (state_ == State::Empty || endpoint_ == nullptr) return invalidState("registerThisThread");

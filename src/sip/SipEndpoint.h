@@ -16,9 +16,17 @@
 #include "util/Result.h"
 
 #include <memory>
+#include <string>
 #include <string_view>
+#include <vector>
 
 namespace polphone::sip {
+
+struct EffectiveCodec {
+    std::string id;
+    unsigned priority{0};
+    std::string description;
+};
 
 class SipEndpoint final {
 public:
@@ -37,6 +45,7 @@ public:
     [[nodiscard]] util::Result<void> start();
     [[nodiscard]] util::Result<void> applyCodecPriorities(
         const config::CodecsConfig& config);
+    [[nodiscard]] util::Result<std::vector<EffectiveCodec>> listCodecs();
     [[nodiscard]] util::Result<void> registerThisThread(std::string_view name);
     [[nodiscard]] util::Result<void> hangupAllCalls();
     [[nodiscard]] util::Result<void> destroy() noexcept;

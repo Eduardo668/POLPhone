@@ -266,6 +266,20 @@ TEST_SUITE("redactor") {
         CHECK(lines[0].find("[REDACTED]") != std::string::npos);
     }
 
+    TEST_CASE("Logger altera o nível de um sink em runtime")
+    {
+        Logger logger;
+        auto memory = std::make_shared<MemorySink>();
+        REQUIRE(logger.addSink(memory, LogLevel::Info));
+        CHECK(logger.debug("test", "antes"));
+        CHECK(memory->lines().empty());
+        REQUIRE(logger.setSinkLevel(memory, LogLevel::Debug));
+        CHECK(logger.debug("test", "depois"));
+        REQUIRE(memory->lines().size() == 1);
+        CHECK(memory->lines()[0].find("depois") != std::string::npos);
+        CHECK_FALSE(logger.setSinkLevel(std::make_shared<MemorySink>(), LogLevel::Trace));
+    }
+
     TEST_CASE("arquivo temporário recebe somente conteúdo sanitizado")
     {
         TemporaryPath temporary;
