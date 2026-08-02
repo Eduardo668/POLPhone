@@ -163,6 +163,21 @@ destrói conta, áudio e endpoint nessa ordem. Cada espera de rede/callback tem 
 o arquivo de log termina com `encerramento concluído` mesmo quando um timeout exige continuar a
 limpeza.
 
+## Validação de campo DTMF
+
+O roteiro reproduzível está em [`docs/FIELD-TEST-GUIDE.md`](docs/FIELD-TEST-GUIDE.md) e a tabela de
+resultados em [`docs/TEST-MATRIX.md`](docs/TEST-MATRIX.md). A matriz permanece explicitamente como
+**não executada** até haver um ensaio autorizado contra o ramal interno e a URA externa, com
+observação simultânea no PABX e no tronco. Nenhum método ou duração é declarado vencedor sem essa
+evidência de ponta a ponta.
+
+Preparação validada em 2 de agosto de 2026: build Windows x64 Release concluído, versão
+`POLPhone 0.1.0`/`PJSIP 2.17` conferida e `--selftest` encerrado com código `0` e marcador final. Essa
+validação comprova o binário e o roteiro, não substitui o ensaio de campo.
+
+Capturas `.pcap`/`.pcapng`, logs SIP/RTP, credenciais e números reais devem ficar fora do repositório.
+Na documentação versionada, use somente aliases de destino e resultados sanitizados.
+
 ## Documentação
 
 Arquitetura, ordem de implementação e decisões estão em `docs/`. Esses documentos são normativos para o projeto.
