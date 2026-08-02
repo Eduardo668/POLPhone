@@ -36,8 +36,8 @@ public:
     [[nodiscard]] std::size_t reap() noexcept;
     [[nodiscard]] std::size_t retiredCount() const noexcept;
 
-    [[nodiscard]] bool waitUntilIdle(std::chrono::milliseconds timeout);
-    [[nodiscard]] bool waitUntilSafeToReap(std::chrono::milliseconds timeout);
+    [[nodiscard]] bool waitUntilIdle(std::chrono::milliseconds timeout) noexcept;
+    [[nodiscard]] bool waitUntilSafeToReap(std::chrono::milliseconds timeout) noexcept;
     void notifyCallbackComplete() noexcept;
 
 private:

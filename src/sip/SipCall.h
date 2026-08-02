@@ -44,6 +44,8 @@ struct DtmfInfoResponse {
 [[nodiscard]] app::CallState callStateFromPjsip(pjsip_inv_state state) noexcept;
 [[nodiscard]] std::string_view callMediaStatusName(
     pjsua_call_media_status status) noexcept;
+[[nodiscard]] std::string callStatusMessage(int sipCode,
+                                            std::string_view reason);
 
 class SipCall final : public pj::Call {
 public:
@@ -90,6 +92,8 @@ private:
 
     void publishCallbackFailure(std::string_view callback,
                                 std::string_view detail) noexcept;
+    void publishPjCallbackFailure(std::string_view callback,
+                                  const pj::Error& error) noexcept;
     [[nodiscard]] util::Result<void> connectAudio(unsigned mediaIndex);
     void disconnectAudio(bool retainMedia = false) noexcept;
     void publishMediaFailure(std::string_view message,

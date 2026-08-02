@@ -152,36 +152,65 @@ util::Result<void> SipAccount::setRegistrationEnabled(bool enabled)
 
 util::Result<void> SipAccount::unregisterAndWait(std::chrono::milliseconds timeout)
 {
-    if (!created_ || !isValid()) return util::Result<void>::success();
+    try {
+        if (!created_ || !isValid()) return util::Result<void>::success();
 
-    const auto information = POLPHONE_PJ_TRY(getInfo());
-    if (!information) return util::Result<void>::failure(information.error());
-    if (!information.value().regIsConfigured || !information.value().regIsActive) {
+        const auto information = POLPHONE_PJ_TRY(getInfo());
+        if (!information) return util::Result<void>::failure(information.error());
+        if (!information.value().regIsConfigured || !information.value().regIsActive) {
+            return util::Result<void>::success();
+        }
+        {
+            std::lock_guard<std::mutex> lock(registrationMutex_);
+            registrationActive_ = true;
+        }
+        const auto requested = setRegistrationEnabled(false);
+        if (!requested) return requested;
+
+        std::unique_lock<std::mutex> lock(registrationMutex_);
+        if (!registrationCondition_.wait_for(
+                lock, timeout, [this] { return !registrationActive_; })) {
+            static_cast<void>(logger_.warning(
+                "sip", "Timeout de 3 s ao aguardar un-REGISTER; prosseguindo com shutdown."));
+        }
         return util::Result<void>::success();
+    } catch (const pj::Error& error) {
+        return util::Result<void>::failure(
+            makePjError(error, "aguardar un-REGISTER"));
+    } catch (const std::exception& error) {
+        return util::Result<void>::failure(
+            util::ErrorCode::Runtime,
+            "Falha inesperada ao aguardar un-REGISTER; prosseguindo com shutdown.",
+            error.what());
+    } catch (...) {
+        return util::Result<void>::failure(
+            util::ErrorCode::Runtime,
+            "Falha desconhecida ao aguardar un-REGISTER; prosseguindo com shutdown.");
     }
-    const auto requested = setRegistrationEnabled(false);
-    if (!requested) return requested;
-
-    std::unique_lock<std::mutex> lock(registrationMutex_);
-    if (!registrationCondition_.wait_for(
-            lock, timeout, [this] { return !registrationActive_; })) {
-        static_cast<void>(logger_.warning(
-            "sip", "Timeout de 3 s ao aguardar un-REGISTER; prosseguindo com shutdown."));
-    }
-    return util::Result<void>::success();
 }
 
 void SipAccount::shutdownAccount() noexcept
 {
     if (shuttingDown_.exchange(true)) return;
-    if (created_) {
-        const auto unregistered = unregisterAndWait();
-        if (!unregistered) {
-            static_cast<void>(logger_.warning(
-                "sip", unregistered.error().message + " " + unregistered.error().detail));
+    try {
+        if (created_) {
+            const auto unregistered = unregisterAndWait();
+            if (!unregistered) {
+                static_cast<void>(logger_.log(
+                    logging::LogLevel::Warning,
+                    "sip",
+                    unregistered.error().message,
+                    unregistered.error().detail));
+            }
         }
+        if (created_ && isValid()) pj::Account::shutdown();
+    } catch (const pj::Error& error) {
+        publishPjCallbackFailure("shutdownAccount", error);
+    } catch (const std::exception& error) {
+        publishCallbackFailure("shutdownAccount", error.what());
+    } catch (...) {
+        publishCallbackFailure("shutdownAccount", "exceção desconhecida");
     }
-    if (created_ && isValid()) pj::Account::shutdown();
     created_ = false;
 }
 
@@ -191,7 +220,7 @@ void SipAccount::onRegState(pj::OnRegStateParam& parameter) noexcept
         const pj::AccountInfo information = getInfo();
         publishRegistration(parameter, information);
     } catch (const pj::Error& error) {
-        publishCallbackFailure("onRegState", describe(error));
+        publishPjCallbackFailure("onRegState", error);
     } catch (const std::exception& error) {
         publishCallbackFailure("onRegState", error.what());
     } catch (...) {
@@ -233,7 +262,7 @@ void SipAccount::onIncomingCall(pj::OnIncomingCallParam& parameter) noexcept
             "call",
             "Chamada entrante aguardando atendimento (180 Ringing)."}));
     } catch (const pj::Error& error) {
-        publishCallbackFailure("onIncomingCall", describe(error));
+        publishPjCallbackFailure("onIncomingCall", error);
     } catch (const std::exception& error) {
         publishCallbackFailure("onIncomingCall", error.what());
     } catch (...) {
@@ -288,6 +317,18 @@ void SipAccount::publishCallbackFailure(
     } catch (...) {
         static_cast<void>(logger_.error(
             "sip", "Callback falhou e o diagnóstico detalhado não pôde ser alocado."));
+    }
+}
+
+void SipAccount::publishPjCallbackFailure(
+    std::string_view callback,
+    const pj::Error& error) noexcept
+{
+    try {
+        const std::string detail = describe(error);
+        publishCallbackFailure(callback, detail);
+    } catch (...) {
+        publishCallbackFailure(callback, "pj::Error sem memória para diagnóstico");
     }
 }
 

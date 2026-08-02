@@ -308,8 +308,11 @@ std::filesystem::path FileLogSink::currentPath() const
 Logger::~Logger()
 {
     static_cast<void>(flush());
-    std::lock_guard<std::mutex> lock(sinksMutex_);
-    sinks_.clear();
+    try {
+        std::lock_guard<std::mutex> lock(sinksMutex_);
+        sinks_.clear();
+    } catch (...) {
+    }
 }
 
 bool Logger::addSink(std::shared_ptr<LogSink> sink, LogLevel maxLevel) noexcept

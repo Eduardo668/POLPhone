@@ -23,6 +23,8 @@ namespace polphone::sip {
 
 [[nodiscard]] std::string statusToString(pj_status_t status);
 [[nodiscard]] std::string describe(const pj::Error& error);
+[[nodiscard]] std::string friendlyPjMessage(pj_status_t status,
+                                            std::string_view operation);
 [[nodiscard]] util::Error makePjError(const pj::Error& error,
                                       std::string_view operation);
 

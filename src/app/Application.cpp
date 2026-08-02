@@ -514,6 +514,7 @@ std::size_t Application::reapCalls() noexcept
 
 void Application::shutdown() noexcept
 {
+    constexpr auto shutdownTimeout = std::chrono::seconds(3);
     if (shutdownStarted_) return;
     shutdownStarted_ = true;
     initialized_ = false;
@@ -523,18 +524,30 @@ void Application::shutdown() noexcept
     if (sip::SipCall* call = calls_.current(); call != nullptr) {
         const auto hungUp = call->hangupCall();
         if (!hungUp) {
-            static_cast<void>(logger_.warning(
-                "call", hungUp.error().message + " " + hungUp.error().detail));
+            static_cast<void>(logger_.log(
+                logging::LogLevel::Warning,
+                "call",
+                hungUp.error().message,
+                hungUp.error().detail));
         }
-        static_cast<void>(calls_.waitUntilIdle(std::chrono::seconds(3)));
+        if (!calls_.waitUntilIdle(shutdownTimeout)) {
+            static_cast<void>(logger_.warning(
+                "call", "Timeout de 3 s ao aguardar DISCONNECTED; aplicando hangup global."));
+        }
     }
     if (endpoint_ != nullptr && endpoint_->isStarted()) {
         const auto allHungUp = endpoint_->hangupAllCalls();
         if (!allHungUp) {
-            static_cast<void>(logger_.warning(
-                "call", allHungUp.error().message + " " + allHungUp.error().detail));
+            static_cast<void>(logger_.log(
+                logging::LogLevel::Warning,
+                "call",
+                allHungUp.error().message,
+                allHungUp.error().detail));
         }
-        static_cast<void>(calls_.waitUntilIdle(std::chrono::seconds(1)));
+        if (!calls_.waitUntilIdle(shutdownTimeout)) {
+            static_cast<void>(logger_.warning(
+                "call", "Timeout de 3 s após hangup global; prosseguindo com libDestroy."));
+        }
     }
     if (sip::SipCall* remaining = calls_.current(); remaining != nullptr) {
         calls_.retire(remaining);
@@ -543,11 +556,17 @@ void Application::shutdown() noexcept
     if (account_ != nullptr) {
         const auto unregistered = account_->unregisterAndWait();
         if (!unregistered) {
-            static_cast<void>(logger_.warning(
-                "sip", unregistered.error().message + " " + unregistered.error().detail));
+            static_cast<void>(logger_.log(
+                logging::LogLevel::Warning,
+                "sip",
+                unregistered.error().message,
+                unregistered.error().detail));
         }
     }
-    static_cast<void>(calls_.waitUntilSafeToReap(std::chrono::seconds(3)));
+    if (!calls_.waitUntilSafeToReap(shutdownTimeout)) {
+        static_cast<void>(logger_.warning(
+            "call", "Timeout de 3 s ao aguardar callbacks; prosseguindo com shutdown."));
+    }
     static_cast<void>(calls_.reap());
     static_cast<void>(logger_.info(
         "call", "Shutdown de chamadas concluído; objetos vivos="
@@ -570,6 +589,7 @@ void Application::shutdown() noexcept
         endpoint_.reset();
     }
     config_.reset();
+    static_cast<void>(logger_.info("app", "encerramento concluído"));
     consoleSink_.reset();
     if (!logger_.flush()) {
         std::cerr << "Aviso [LOG_FLUSH]: não foi possível descarregar todos os logs.\n";

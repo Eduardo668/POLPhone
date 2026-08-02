@@ -9,6 +9,7 @@
 #include <pj/config.h>
 
 #include "app/Application.h"
+#include "app/ExitCodes.h"
 #include "util/Result.h"
 #include "util/Strings.h"
 
@@ -47,24 +48,6 @@ std::string_view errorCodeName(polphone::util::ErrorCode code)
     case ErrorCode::Runtime: return "RUNTIME";
     }
     return "UNKNOWN";
-}
-
-int exitCodeFor(const polphone::util::Error& error)
-{
-    using polphone::util::ErrorCode;
-    switch (error.code) {
-    case ErrorCode::NotFound:
-    case ErrorCode::Io:
-    case ErrorCode::Parse:
-    case ErrorCode::Validation:
-    case ErrorCode::InvalidArgument:
-        return 1;
-    case ErrorCode::Pjsip:
-        return 2;
-    case ErrorCode::Runtime:
-        return 3;
-    }
-    return 3;
 }
 
 void printError(const polphone::util::Error& error)
@@ -149,7 +132,7 @@ int main(int argc, char* argv[])
     const auto initialized = application.initialize();
     if (!initialized) {
         printError(initialized.error());
-        return exitCodeFor(initialized.error());
+        return polphone::app::initializationExitCode(initialized.error().code);
     }
     return application.run();
 }

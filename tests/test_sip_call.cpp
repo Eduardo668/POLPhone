@@ -68,4 +68,20 @@ TEST_SUITE("call") {
               == "REMOTE_HOLD");
         CHECK(polphone::sip::callMediaStatusName(PJSUA_CALL_MEDIA_ERROR) == "ERROR");
     }
+
+    TEST_CASE("traduz respostas finais de chamada para ação do operador")
+    {
+        CHECK(polphone::sip::callStatusMessage(404, "Not Found")
+              .find("não encontrado") != std::string::npos);
+        CHECK(polphone::sip::callStatusMessage(408, "Request Timeout")
+              .find("firewall") != std::string::npos);
+        CHECK(polphone::sip::callStatusMessage(486, "Busy Here")
+              .find("ocupado") != std::string::npos);
+        CHECK(polphone::sip::callStatusMessage(503, "Service Unavailable")
+              .find("indisponível") != std::string::npos);
+        CHECK(polphone::sip::callStatusMessage(603, "Decline")
+              .find("recusada") != std::string::npos);
+        CHECK(polphone::sip::callStatusMessage(488, "Not Acceptable Here")
+              .find("488 Not Acceptable Here") != std::string::npos);
+    }
 }

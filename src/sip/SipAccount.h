@@ -58,6 +58,8 @@ private:
                              const pj::AccountInfo& information);
     void publishCallbackFailure(std::string_view callback,
                                 std::string_view detail) noexcept;
+    void publishPjCallbackFailure(std::string_view callback,
+                                  const pj::Error& error) noexcept;
 
     app::AppState& state_;
     app::EventQueue& events_;

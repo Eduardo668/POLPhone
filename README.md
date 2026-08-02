@@ -151,6 +151,18 @@ Para compilar e executar os testes unitários:
 .\build\Debug\polphone_tests.exe
 ```
 
+## Diagnóstico e encerramento
+
+Erros conhecidos de transporte, áudio, registro, chamada e DTMF são traduzidos para uma ação do
+operador, mantendo o código PJSIP no detalhe técnico. O processo retorna `0` no encerramento normal,
+`1` para configuração/argumentos, `2` para falha de inicialização, `3` para falha fatal em runtime e
+`130` quando interrompido por `Ctrl+C`.
+
+O shutdown cancela o DTMF in-band, encerra chamadas, aplica `hangupAllCalls`, solicita un-REGISTER e
+destrói conta, áudio e endpoint nessa ordem. Cada espera de rede/callback tem limite de três segundos;
+o arquivo de log termina com `encerramento concluído` mesmo quando um timeout exige continuar a
+limpeza.
+
 ## Documentação
 
 Arquitetura, ordem de implementação e decisões estão em `docs/`. Esses documentos são normativos para o projeto.

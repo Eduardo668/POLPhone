@@ -36,14 +36,22 @@ util::Result<void> CallRegistry::adopt(std::unique_ptr<SipCall>& call)
 
 SipCall* CallRegistry::current() const noexcept
 {
-    std::lock_guard<std::mutex> lock(mutex_);
-    return current_.get();
+    try {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return current_.get();
+    } catch (...) {
+        return nullptr;
+    }
 }
 
 bool CallRegistry::hasActiveCall() const noexcept
 {
-    std::lock_guard<std::mutex> lock(mutex_);
-    return current_ != nullptr;
+    try {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return current_ != nullptr;
+    } catch (...) {
+        return true;
+    }
 }
 
 void CallRegistry::retire(SipCall* call) noexcept
@@ -90,24 +98,36 @@ std::size_t CallRegistry::reap() noexcept
 
 std::size_t CallRegistry::retiredCount() const noexcept
 {
-    std::lock_guard<std::mutex> lock(mutex_);
-    return graveyard_.size();
+    try {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return graveyard_.size();
+    } catch (...) {
+        return 0U;
+    }
 }
 
-bool CallRegistry::waitUntilIdle(std::chrono::milliseconds timeout)
+bool CallRegistry::waitUntilIdle(std::chrono::milliseconds timeout) noexcept
 {
-    std::unique_lock<std::mutex> lock(mutex_);
-    return condition_.wait_for(lock, timeout, [this] { return current_ == nullptr; });
+    try {
+        std::unique_lock<std::mutex> lock(mutex_);
+        return condition_.wait_for(lock, timeout, [this] { return current_ == nullptr; });
+    } catch (...) {
+        return false;
+    }
 }
 
-bool CallRegistry::waitUntilSafeToReap(std::chrono::milliseconds timeout)
+bool CallRegistry::waitUntilSafeToReap(std::chrono::milliseconds timeout) noexcept
 {
-    std::unique_lock<std::mutex> lock(mutex_);
-    return condition_.wait_for(lock, timeout, [this] {
-        return std::all_of(
-            graveyard_.cbegin(), graveyard_.cend(),
-            [](const std::unique_ptr<SipCall>& call) { return call->canReap(); });
-    });
+    try {
+        std::unique_lock<std::mutex> lock(mutex_);
+        return condition_.wait_for(lock, timeout, [this] {
+            return std::all_of(
+                graveyard_.cbegin(), graveyard_.cend(),
+                [](const std::unique_ptr<SipCall>& call) { return call->canReap(); });
+        });
+    } catch (...) {
+        return false;
+    }
 }
 
 void CallRegistry::notifyCallbackComplete() noexcept

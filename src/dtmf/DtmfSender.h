@@ -18,6 +18,7 @@
 #include "util/Result.h"
 
 #include <atomic>
+#include <condition_variable>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -156,6 +157,9 @@ private:
     mutable std::mutex workerMutex_;
     std::thread worker_;
     std::atomic<bool> cancelWorker_{false};
+    mutable std::mutex workerCompletionMutex_;
+    std::condition_variable workerCompletionCondition_;
+    bool workerCompleted_{true};
 };
 
 } // namespace polphone::dtmf

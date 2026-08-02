@@ -13,6 +13,7 @@
 #endif
 
 #include <limits>
+#include <exception>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -202,6 +203,10 @@ void PjLogWriter::write(const pj::LogEntry& entry) noexcept
             }
             begin = end + 1U;
         }
+    } catch (const pj::Error&) {
+        // A callback não pode propagar falhas para o código C do PJSIP.
+    } catch (const std::exception&) {
+        // A callback não pode propagar falhas para o código C do PJSIP.
     } catch (...) {
         // A callback não pode propagar falhas para o código C do PJSIP.
     }

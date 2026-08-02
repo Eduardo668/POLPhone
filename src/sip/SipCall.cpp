@@ -113,6 +113,28 @@ std::string_view callMediaStatusName(pjsua_call_media_status status) noexcept
     return "UNKNOWN";
 }
 
+std::string callStatusMessage(int sipCode, std::string_view reason)
+{
+    switch (sipCode) {
+    case PJSIP_SC_NOT_FOUND:
+        return "Destino SIP não encontrado — verifique o número, domínio e rota do PABX.";
+    case PJSIP_SC_REQUEST_TIMEOUT:
+        return "Sem resposta ao INVITE — verifique conectividade, NAT e firewall UDP.";
+    case PJSIP_SC_BUSY_HERE:
+        return "Destino ocupado — aguarde e tente novamente.";
+    case PJSIP_SC_DECLINE:
+        return "Chamada recusada pelo destino.";
+    case PJSIP_SC_SERVICE_UNAVAILABLE:
+        return "PABX ou rota de saída indisponível — tente novamente mais tarde.";
+    default:
+        break;
+    }
+    if (!reason.empty()) {
+        return "Chamada SIP: " + std::to_string(sipCode) + " " + std::string(reason);
+    }
+    return "Estado da chamada atualizado (SIP " + std::to_string(sipCode) + ").";
+}
+
 SipCall::SipCall(pj::Account& account,
                  CallRegistry& registry,
                  app::AppState& state,
@@ -326,11 +348,14 @@ void SipCall::onCallState(pj::OnCallStateParam&) noexcept
                 ? app::UiEventSeverity::Warning
                 : app::UiEventSeverity::Info,
             "call",
-            "Estado: " + callStateText(state) + " code="
-                + std::to_string(information.lastStatusCode) + " reason="
-                + information.lastReason}));
+            information.lastStatusCode >= 400
+                ? callStatusMessage(
+                    static_cast<int>(information.lastStatusCode), information.lastReason)
+                : "Estado: " + callStateText(state) + " code="
+                    + std::to_string(information.lastStatusCode) + " reason="
+                    + information.lastReason}));
     } catch (const pj::Error& error) {
-        publishCallbackFailure("onCallState", describe(error));
+        publishPjCallbackFailure("onCallState", error);
     } catch (const std::exception& error) {
         publishCallbackFailure("onCallState", error.what());
     } catch (...) {
@@ -362,7 +387,7 @@ void SipCall::onCallTsxState(pj::OnCallTsxStateParam& parameter) noexcept
                 + std::to_string(transaction.statusCode) + " "
                 + transaction.statusText}));
     } catch (const pj::Error& error) {
-        publishCallbackFailure("onCallTsxState", describe(error));
+        publishPjCallbackFailure("onCallTsxState", error);
     } catch (const std::exception& error) {
         publishCallbackFailure("onCallTsxState", error.what());
     } catch (...) {
@@ -423,7 +448,7 @@ void SipCall::handleInfoTransaction(
                 + std::to_string(exchange->statusCode) + " "
                 + exchange->statusText}));
     } catch (const pj::Error& error) {
-        publishCallbackFailure("onCallTsxState/INFO", describe(error));
+        publishPjCallbackFailure("onCallTsxState/INFO", error);
     } catch (const std::exception& error) {
         publishCallbackFailure("onCallTsxState/INFO", error.what());
     } catch (...) {
@@ -510,7 +535,7 @@ void SipCall::onCallMediaState(pj::OnCallMediaStateParam&) noexcept
                 "media", "A chamada não possui fluxo de áudio negociado."));
         }
     } catch (const pj::Error& error) {
-        publishCallbackFailure("onCallMediaState", describe(error));
+        publishPjCallbackFailure("onCallMediaState", error);
     } catch (const std::exception& error) {
         publishCallbackFailure("onCallMediaState", error.what());
     } catch (...) {
@@ -661,6 +686,18 @@ void SipCall::publishCallbackFailure(
     } catch (...) {
         static_cast<void>(logger_.error(
             "call", "Callback falhou e o diagnóstico detalhado não pôde ser alocado."));
+    }
+}
+
+void SipCall::publishPjCallbackFailure(
+    std::string_view callback,
+    const pj::Error& error) noexcept
+{
+    try {
+        const std::string detail = describe(error);
+        publishCallbackFailure(callback, detail);
+    } catch (...) {
+        publishCallbackFailure(callback, "pj::Error sem memória para diagnóstico");
     }
 }
 

@@ -80,7 +80,21 @@ DtmfSender::DtmfSender(
 DtmfSender::~DtmfSender()
 {
     cancelWorker_ = true;
-    if (worker_.joinable()) worker_.join();
+    if (worker_.joinable()) {
+        bool completed = false;
+        try {
+            std::unique_lock<std::mutex> lock(workerCompletionMutex_);
+            completed = workerCompletionCondition_.wait_for(
+                lock, std::chrono::seconds(3), [this] { return workerCompleted_; });
+        } catch (...) {
+        }
+        if (!completed) {
+            static_cast<void>(logger_.warning(
+                "dtmf",
+                "Timeout de 3 s ao cancelar DTMF in-band; aguardando saída segura do worker."));
+        }
+        worker_.join();
+    }
     toneGenerator_.reset();
 }
 
@@ -332,8 +346,17 @@ util::Result<DtmfResult> DtmfSender::startInband(
     call.retainExternalUse();
     cancelWorker_ = false;
     try {
+        {
+            std::lock_guard<std::mutex> completionLock(workerCompletionMutex_);
+            workerCompleted_ = false;
+        }
         std::lock_guard<std::mutex> lock(workerMutex_);
         if (worker_.joinable()) {
+            {
+                std::lock_guard<std::mutex> completionLock(workerCompletionMutex_);
+                workerCompleted_ = true;
+            }
+            workerCompletionCondition_.notify_all();
             call.releaseExternalUse();
             return util::Result<DtmfResult>::failure(
                 util::ErrorCode::Runtime,
@@ -347,12 +370,23 @@ util::Result<DtmfResult> DtmfSender::startInband(
             request,
             correlationId);
     } catch (const std::exception& error) {
+        {
+            std::lock_guard<std::mutex> completionLock(workerCompletionMutex_);
+            workerCompleted_ = true;
+        }
+        workerCompletionCondition_.notify_all();
         call.releaseExternalUse();
         return util::Result<DtmfResult>::failure(
             util::ErrorCode::Runtime,
             "Não foi possível iniciar o worker DTMF in-band.",
             error.what());
     } catch (...) {
+        try {
+            std::lock_guard<std::mutex> completionLock(workerCompletionMutex_);
+            workerCompleted_ = true;
+        } catch (...) {
+        }
+        workerCompletionCondition_.notify_all();
         call.releaseExternalUse();
         return util::Result<DtmfResult>::failure(
             util::ErrorCode::Runtime,
@@ -640,6 +674,14 @@ void DtmfSender::runInband(
         } catch (...) {
         }
     }
+    {
+        try {
+            std::lock_guard<std::mutex> lock(workerCompletionMutex_);
+            workerCompleted_ = true;
+        } catch (...) {
+        }
+    }
+    workerCompletionCondition_.notify_all();
     requestGate_.finish();
 }
 
