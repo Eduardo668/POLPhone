@@ -8,6 +8,7 @@
 
 #pragma once
 
+#include "audio/AudioDeviceService.h"
 #include "config/AppConfig.h"
 #include "logging/Logger.h"
 #include "sip/SipEndpoint.h"
@@ -23,6 +24,8 @@ struct ApplicationOptions {
     std::filesystem::path configPath{"config/polphone.config.json"};
     std::optional<int> consoleLogLevel;
     bool selftest{false};
+    bool listDevices{false};
+    bool useBuiltInConfig{false};
 };
 
 class Application final {
@@ -46,6 +49,7 @@ private:
     logging::Logger logger_;
     std::optional<config::AppConfig> config_;
     std::unique_ptr<sip::SipEndpoint> endpoint_;
+    std::unique_ptr<audio::AudioDeviceService> audioDevices_;
     bool initialized_{false};
     bool shutdownStarted_{false};
 };

@@ -30,7 +30,8 @@ void printVersion()
 void printUsage()
 {
     std::cout << "Uso: polphone.exe [--version]\n"
-              << "     polphone.exe [--config <caminho>] [--selftest] [--log-level 0..6]\n";
+              << "     polphone.exe [--config <caminho>] [--selftest | --list-devices]"
+                 " [--log-level 0..6]\n";
 }
 
 std::string_view errorCodeName(polphone::util::ErrorCode code)
@@ -106,6 +107,10 @@ int main(int argc, char* argv[])
             options.selftest = true;
             continue;
         }
+        if (argument == "--list-devices" && !options.listDevices) {
+            options.listDevices = true;
+            continue;
+        }
         if (argument == "--config" && !configWasSpecified && index + 1 < argc
             && std::string_view(argv[index + 1]).find("--") != 0U) {
             options.configPath = argv[++index];
@@ -128,11 +133,16 @@ int main(int argc, char* argv[])
         return 1;
     }
 
-    if (!options.selftest && !configWasSpecified) {
-        std::cerr << "Erro [ARGUMENT]: nenhuma ação reconhecida. Use --selftest ou --config.\n";
+    if (options.selftest && options.listDevices) {
+        std::cerr << "Erro [ARGUMENT]: --selftest e --list-devices são ações exclusivas.\n";
+        return 1;
+    }
+    if (!options.selftest && !options.listDevices && !configWasSpecified) {
+        std::cerr << "Erro [ARGUMENT]: nenhuma ação reconhecida. Use --selftest, --list-devices ou --config.\n";
         printUsage();
         return 1;
     }
+    options.useBuiltInConfig = options.listDevices && !configWasSpecified;
 
     printVersion();
     polphone::app::Application application(std::move(options));

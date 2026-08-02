@@ -119,6 +119,29 @@ target_compile_options(polphone_sip PRIVATE
     $<$<CONFIG:Release>:/O2;/Zi>
 )
 
+add_library(polphone_audio STATIC
+    src/audio/AudioDeviceService.cpp
+)
+target_include_directories(polphone_audio PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_compile_definitions(polphone_audio PRIVATE
+    WIN32_LEAN_AND_MEAN
+    NOMINMAX
+    _CRT_SECURE_NO_WARNINGS
+    _WINSOCK_DEPRECATED_NO_WARNINGS
+    UNICODE
+    _UNICODE
+    PJ_WIN32=1
+    PJ_M_X86_64=1
+)
+target_link_libraries(polphone_audio
+    PUBLIC PJSIP::pjsua2 polphone_config polphone_logging polphone_sip
+    PRIVATE polphone_warnings
+)
+target_compile_options(polphone_audio PRIVATE
+    $<$<CONFIG:Debug>:/Zi;/Od;/RTC1>
+    $<$<CONFIG:Release>:/O2;/Zi>
+)
+
 add_library(polphone_app STATIC
     src/app/Application.cpp
 )
@@ -134,7 +157,7 @@ target_compile_definitions(polphone_app PRIVATE
     PJ_M_X86_64=1
 )
 target_link_libraries(polphone_app
-    PUBLIC polphone_config polphone_logging polphone_sip
+    PUBLIC polphone_audio polphone_config polphone_logging polphone_sip
     PRIVATE polphone_warnings
 )
 target_compile_options(polphone_app PRIVATE
@@ -161,6 +184,7 @@ target_link_libraries(polphone PRIVATE
     polphone_logging
     polphone_pjsip_logging
     polphone_sip
+    polphone_audio
     polphone_app
     polphone_warnings
 )

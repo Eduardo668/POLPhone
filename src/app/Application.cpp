@@ -49,11 +49,15 @@ util::Result<void> Application::initialize()
     shutdownStarted_ = false;
 
     config::ConfigLoader::Warnings warnings;
-    auto loaded = config::ConfigLoader::load(options_.configPath, &warnings);
-    if (!loaded) return util::Result<void>::failure(loaded.error());
-    const auto validated = config::ConfigValidator::validate(loaded.value());
-    if (!validated) return util::Result<void>::failure(validated.error());
-    config_.emplace(std::move(loaded).value());
+    if (options_.useBuiltInConfig) {
+        config_.emplace();
+    } else {
+        auto loaded = config::ConfigLoader::load(options_.configPath, &warnings);
+        if (!loaded) return util::Result<void>::failure(loaded.error());
+        const auto validated = config::ConfigValidator::validate(loaded.value());
+        if (!validated) return util::Result<void>::failure(validated.error());
+        config_.emplace(std::move(loaded).value());
+    }
 
     const int consoleLevelNumber =
         options_.consoleLogLevel.value_or(config_->logging.consoleLevel);
@@ -112,6 +116,23 @@ util::Result<void> Application::initialize()
     if (const auto result = endpoint_->applyCodecPriorities(config_->codecs); !result) {
         return failInitialization(result.error());
     }
+    try {
+        audioDevices_ = std::make_unique<audio::AudioDeviceService>(
+            *endpoint_->native(), logger_);
+    } catch (const std::exception& error) {
+        return failInitialization(util::Error{
+            util::ErrorCode::Runtime,
+            "Não foi possível reservar o serviço de áudio; libere memória e tente novamente.",
+            error.what()});
+    } catch (...) {
+        return failInitialization(util::Error{
+            util::ErrorCode::Runtime,
+            "Falha desconhecida ao reservar o serviço de áudio; reinicie a aplicação.",
+            {}});
+    }
+    if (const auto result = audioDevices_->apply(config_->audio); !result) {
+        return failInitialization(result.error());
+    }
 
     initialized_ = true;
     static_cast<void>(logger_.info("app", "Inicialização do endpoint concluída."));
@@ -124,6 +145,26 @@ int Application::run()
         static_cast<void>(logger_.error(
             "app", "Aplicação não inicializada; execute novamente e revise os erros anteriores."));
         return 3;
+    }
+    if (options_.listDevices) {
+        const auto devices = audioDevices_->list();
+        if (!devices) {
+            static_cast<void>(logger_.log(
+                logging::LogLevel::Error,
+                "audio",
+                devices.error().message,
+                devices.error().detail));
+            return 3;
+        }
+        std::cout << "Dispositivos de áudio (WMME):\n";
+        for (const auto& device : devices.value()) {
+            std::cout << "  #" << device.id
+                      << " [in:" << device.inputCount << "]"
+                      << " [out:" << device.outputCount << "] "
+                      << device.name << " — " << device.driver
+                      << " @ " << device.defaultSamplesPerSec << " Hz\n";
+        }
+        return 0;
     }
     if (options_.selftest) {
         static_cast<void>(logger_.info(
@@ -138,6 +179,7 @@ void Application::shutdown() noexcept
     shutdownStarted_ = true;
     initialized_ = false;
 
+    audioDevices_.reset();
     if (endpoint_ != nullptr) {
         const auto destroyed = endpoint_->destroy();
         if (!destroyed) {

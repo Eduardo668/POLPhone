@@ -2,12 +2,14 @@
 
 POLPhone é uma prova técnica de softphone SIP para Windows x64, escrita em C++17 sobre PJSIP/PJSUA2 2.17. O MVP é operado por console e existe para comparar, de forma explícita e auditável, métodos de DTMF em chamadas SIP.
 
-O repositório já contém o build reproduzível do pjproject, utilitários base, testes unitários, logging estruturado com redaction e integração segura dos logs do PJSIP, além do carregamento e da validação da configuração JSON local. A aplicação ainda não cria transporte ou conta SIP e não realiza chamadas, áudio ou envio de DTMF.
+O repositório já contém o build reproduzível do pjproject, utilitários base, testes unitários, logging estruturado com redaction, configuração JSON, ciclo de vida completo do endpoint, transporte SIP UDP e seleção dos dispositivos de áudio WMME. A aplicação ainda não registra uma conta, realiza chamadas ou envia DTMF.
 
 ## Funcionalidades disponíveis
 
 - build Debug e Release para Windows x64 com Visual Studio 2022;
-- `--version` e `--selftest` do ciclo de vida do PJSUA2;
+- `--version` e `--selftest` do endpoint, transporte UDP, codecs e áudio;
+- `--list-devices` para enumerar captura e reprodução WMME em UTF-8;
+- seleção de áudio por nome parcial ou `#<id>`, tolerante ao truncamento do WMME;
 - configuração JSON com defaults, validação semântica e diagnóstico por campo;
 - logging em console e arquivo, com níveis independentes e rotação;
 - mascaramento de credenciais, autenticação SIP e números externos nos logs;
@@ -84,6 +86,15 @@ Para validar somente o bootstrap e a configuração, sem registrar uma conta SIP
 ```powershell
 .\build\Release\polphone.exe --config .\config\polphone.config.json --selftest
 ```
+
+Para listar os dispositivos sem exigir um arquivo de configuração local:
+
+```powershell
+.\build\Release\polphone.exe --list-devices
+```
+
+Os campos `audio.captureDevice` e `audio.playbackDevice` aceitam uma parte não ambígua do nome ou
+`#<id>`. Um nome ausente gera aviso e mantém o dispositivo padrão do sistema.
 
 Para compilar e executar os testes unitários:
 
