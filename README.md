@@ -2,7 +2,16 @@
 
 POLPhone é uma prova técnica de softphone SIP para Windows x64, escrita em C++17 sobre PJSIP/PJSUA2 2.17. O MVP é operado por console e existe para comparar, de forma explícita e auditável, métodos de DTMF em chamadas SIP.
 
-Neste estágio, o repositório contém apenas a infraestrutura inicial de build e um executável mínimo de validação do PJSUA2. Não há conta SIP, transporte, chamada, áudio nem DTMF implementados.
+O repositório já contém o build reproduzível do pjproject, utilitários base, testes unitários, logging estruturado com redaction e integração segura dos logs do PJSIP, além do carregamento e da validação da configuração JSON local. A aplicação ainda não cria transporte ou conta SIP e não realiza chamadas, áudio ou envio de DTMF.
+
+## Funcionalidades disponíveis
+
+- build Debug e Release para Windows x64 com Visual Studio 2022;
+- `--version` e `--selftest` do ciclo de vida do PJSUA2;
+- configuração JSON com defaults, validação semântica e diagnóstico por campo;
+- logging em console e arquivo, com níveis independentes e rotação;
+- mascaramento de credenciais, autenticação SIP e números externos nos logs;
+- testes unitários dos utilitários, da configuração e das regras de redaction.
 
 ## Fora do escopo
 
@@ -59,7 +68,7 @@ Copy-Item config\polphone.config.example.json config\polphone.config.json
 .\scripts\build.ps1 -Config Debug
 .\scripts\build.ps1 -Config Release
 .\build\Release\polphone.exe --version
-.\build\Release\polphone.exe --selftest
+.\build\Release\polphone.exe --config .\config\polphone.config.json --selftest
 ```
 
 O pjproject é compilado por sua solução oficial `pjproject-vs14.sln` com MSBuild, configurações `Debug-Dynamic|x64` e `Release-Dynamic|x64`, toolset v143. O CMake gera apenas a solução do POLPhone; o sistema CMake experimental do pjproject não é utilizado.
@@ -68,7 +77,20 @@ A solução gerada `build/POLPhone.sln` é descartável. Faça alterações nos 
 
 ## Configuração local e dados sensíveis
 
-`config/polphone.config.json` é local e ignorado pelo Git. Copie o exemplo e substitua os marcadores apenas na sua máquina. Nunca versione credenciais, logs, dumps ou capturas SIP/RTP.
+`config/polphone.config.json` é local e ignorado pelo Git. Copie o exemplo e substitua os marcadores apenas na sua máquina. Todos os campos têm defaults; chaves desconhecidas geram aviso e valores inválidos são rejeitados com o caminho do campo. Nunca versione credenciais, logs, dumps ou capturas SIP/RTP.
+
+Para validar somente o bootstrap e a configuração, sem registrar uma conta SIP:
+
+```powershell
+.\build\Release\polphone.exe --config .\config\polphone.config.json --selftest
+```
+
+Para compilar e executar os testes unitários:
+
+```powershell
+.\scripts\build.ps1 -Config Debug -Tests
+.\build\Debug\polphone_tests.exe
+```
 
 ## Documentação
 

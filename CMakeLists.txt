@@ -57,6 +57,20 @@ target_compile_options(polphone_logging PRIVATE
     $<$<CONFIG:Release>:/O2;/Zi>
 )
 
+add_library(polphone_config STATIC
+    src/config/AppConfig.cpp
+    src/config/ConfigLoader.cpp
+    src/config/ConfigValidator.cpp
+)
+target_include_directories(polphone_config PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_link_libraries(polphone_config
+    PRIVATE nlohmann_json polphone_warnings
+)
+target_compile_options(polphone_config PRIVATE
+    $<$<CONFIG:Debug>:/Zi;/Od;/RTC1>
+    $<$<CONFIG:Release>:/O2;/Zi>
+)
+
 # Isola pjsua2.hpp no adaptador; Logger, Redactor e sinks permanecem puros.
 add_library(polphone_pjsip_logging STATIC
     src/logging/PjLogWriter.cpp
@@ -96,6 +110,7 @@ target_link_libraries(polphone PRIVATE
     PJSIP::pjsua2
     nlohmann_json
     polphone_util
+    polphone_config
     polphone_logging
     polphone_pjsip_logging
     polphone_warnings

@@ -1,5 +1,7 @@
 add_executable(polphone_tests
     test_main.cpp
+    test_config_loader.cpp
+    test_config_validator.cpp
     test_redactor.cpp
     test_strings.cpp
 )
@@ -7,6 +9,7 @@ add_executable(polphone_tests
 target_link_libraries(polphone_tests PRIVATE
     doctest
     polphone_util
+    polphone_config
     polphone_logging
     polphone_pjsip_logging
     PJSIP::pjsua2
@@ -17,6 +20,7 @@ target_compile_definitions(polphone_tests PRIVATE
     NOMINMAX
     UNICODE
     _UNICODE
+    POLPHONE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
 target_compile_options(polphone_tests PRIVATE
     $<$<CONFIG:Debug>:/Zi;/Od;/RTC1>
