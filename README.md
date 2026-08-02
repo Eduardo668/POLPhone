@@ -2,7 +2,7 @@
 
 POLPhone é uma prova técnica de softphone SIP para Windows x64, escrita em C++17 sobre PJSIP/PJSUA2 2.17. O MVP é operado por console e existe para comparar, de forma explícita e auditável, métodos de DTMF em chamadas SIP.
 
-O repositório já contém o build reproduzível do pjproject, utilitários base, testes unitários, logging estruturado com redaction, configuração JSON, ciclo de vida completo do endpoint, transporte SIP UDP, seleção dos dispositivos de áudio WMME, registro de uma conta SIP, chamadas com áudio bidirecional, console interativo e envio DTMF por RFC 4733. SIP INFO e in-band ainda estão em desenvolvimento.
+O repositório já contém o build reproduzível do pjproject, utilitários base, testes unitários, logging estruturado com redaction, configuração JSON, ciclo de vida completo do endpoint, transporte SIP UDP, seleção dos dispositivos de áudio WMME, registro de uma conta SIP, chamadas com áudio bidirecional, console interativo e envio DTMF por RFC 4733 ou SIP INFO. O método in-band ainda está em desenvolvimento.
 
 ## Funcionalidades disponíveis
 
@@ -17,6 +17,8 @@ O repositório já contém o build reproduzível do pjproject, utilitários base
 - console com prompt de estado e comandos de registro, chamada, áudio, codecs e log;
 - DTMF RFC 4733 (RFC 2833) com validação, pausa explícita, temporização configurável,
   guards de chamada/mídia, serialização e erro traduzido quando `telephone-event` não foi negociado;
+- DTMF SIP INFO com `application/dtmf-relay`, resposta correlacionada por envio, timeout limitado e
+  tradução de 415, 481 e 501;
 - seleção explícita do método DTMF, sem fallback automático, com logs correlacionados e
   dígitos mascarados por padrão;
 - encerramento gracioso por `quit` ou `Ctrl+C` (código 130 para interrupção);
@@ -108,12 +110,13 @@ Use `help` para listar todos os comandos. O fluxo básico é `status`, `call <de
 
 ```text
 dtmf 5 --method rfc4733
+dtmf 5 --method info
 dtmf 12,3# --duration 250 --gap 100
 ```
 
 A vírgula insere uma pausa fixa de 500 ms. São aceitos `0-9`, `*`, `#` e `A-D`; duração e
 intervalo por requisição não alteram os defaults. `dtmfmode` e `dtmfcfg` já são reconhecidos, mas
-serão habilitados junto das modalidades SIP INFO e in-band nas próximas etapas.
+serão habilitados após a implementação da modalidade in-band.
 
 Para listar os dispositivos sem exigir um arquivo de configuração local:
 

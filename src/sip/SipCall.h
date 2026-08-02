@@ -17,15 +17,26 @@
 #include "util/Result.h"
 
 #include <atomic>
+#include <chrono>
 #include <cstddef>
+#include <condition_variable>
+#include <deque>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 
 namespace polphone::sip {
 
 class CallRegistry;
+
+struct DtmfInfoResponse {
+    int statusCode{0};
+    std::string statusText;
+    bool timedOut{false};
+};
 
 [[nodiscard]] util::Result<std::string> normalizeDestination(
     std::string_view destination,
@@ -55,6 +66,11 @@ public:
     [[nodiscard]] std::optional<pj::AudioMedia> audioMedia() const;
     [[nodiscard]] int audioConfSlot() const noexcept;
     [[nodiscard]] bool hasActiveAudio() const noexcept;
+    [[nodiscard]] util::Result<DtmfInfoResponse> sendDtmfInfo(
+        char digit,
+        unsigned durationMs,
+        std::string correlationId,
+        std::chrono::milliseconds timeout = std::chrono::seconds(5));
 
     void onCallState(pj::OnCallStateParam& parameter) noexcept override;
     void onCallTsxState(pj::OnCallTsxStateParam& parameter) noexcept override;
@@ -76,6 +92,17 @@ private:
     void disconnectAudio(bool retainMedia = false) noexcept;
     void publishMediaFailure(std::string_view message,
                              std::string_view detail = {}) noexcept;
+    void handleInfoTransaction(const pj::SipTransaction& transaction) noexcept;
+    void failPendingInfo(int statusCode, std::string_view statusText) noexcept;
+
+    struct PendingInfo final {
+        std::string correlationId;
+        void* transaction{nullptr};
+        int statusCode{0};
+        std::string statusText;
+        bool completed{false};
+        bool timedOut{false};
+    };
 
     CallRegistry& registry_;
     app::AppState& state_;
@@ -86,6 +113,11 @@ private:
     std::optional<pj::AudioMedia> audioMedia_;
     std::atomic<int> audioConfSlot_{PJSUA_INVALID_ID};
     std::atomic<bool> audioConnected_{false};
+    mutable std::mutex infoMutex_;
+    std::condition_variable infoCondition_;
+    std::shared_ptr<PendingInfo> pendingInfo_;
+    std::deque<std::shared_ptr<PendingInfo>> unboundInfo_;
+    std::unordered_map<void*, std::shared_ptr<PendingInfo>> infoTransactions_;
     std::atomic<unsigned> callbackDepth_{0U};
     static std::atomic<std::size_t> liveCount_;
 };

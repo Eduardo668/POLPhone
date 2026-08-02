@@ -29,6 +29,11 @@ class SipCall;
 
 namespace polphone::dtmf {
 
+[[nodiscard]] util::Result<void> evaluateSipInfoResponse(
+    int statusCode,
+    std::string_view statusText,
+    bool timedOut);
+
 struct DtmfSettings {
     DtmfMethod defaultMethod{DtmfMethod::Rfc4733};
     unsigned durationMs{160U};
@@ -95,6 +100,11 @@ private:
         sip::SipCall& call,
         char digit,
         unsigned durationMs);
+    [[nodiscard]] util::Result<void> sendSipInfo(
+        sip::SipCall& call,
+        char digit,
+        unsigned durationMs,
+        std::string_view correlationId);
     [[nodiscard]] std::string nextCorrelationId();
 
     sip::CallRegistry& calls_;

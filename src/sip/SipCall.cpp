@@ -135,6 +135,7 @@ SipCall::SipCall(pj::Account& account,
 
 SipCall::~SipCall()
 {
+    failPendingInfo(PJSIP_SC_CALL_TSX_DOES_NOT_EXIST, "Chamada destruída");
     disconnectAudio();
     --liveCount_;
     try {
@@ -166,6 +167,87 @@ util::Result<void> SipCall::hangupCall()
 {
     pj::CallOpParam parameter(true);
     return POLPHONE_PJ_TRY(hangup(parameter));
+}
+
+util::Result<DtmfInfoResponse> SipCall::sendDtmfInfo(
+    char digit,
+    unsigned durationMs,
+    std::string correlationId,
+    std::chrono::milliseconds timeout)
+{
+    std::shared_ptr<PendingInfo> exchange;
+    try {
+        exchange = std::make_shared<PendingInfo>();
+        exchange->correlationId = std::move(correlationId);
+        {
+            std::lock_guard<std::mutex> lock(infoMutex_);
+            if (pendingInfo_ != nullptr) {
+                return util::Result<DtmfInfoResponse>::failure(
+                    util::ErrorCode::Runtime,
+                    "Já existe uma transação SIP INFO aguardando resposta.",
+                    pendingInfo_->correlationId);
+            }
+            pendingInfo_ = exchange;
+            unboundInfo_.push_back(exchange);
+        }
+
+        pj::CallSendDtmfParam parameter;
+        parameter.method = PJSUA_DTMF_METHOD_SIP_INFO;
+        parameter.duration = durationMs;
+        parameter.digits.assign(1U, digit);
+        try {
+            sendDtmf(parameter);
+        } catch (const pj::Error& error) {
+            std::lock_guard<std::mutex> lock(infoMutex_);
+            unboundInfo_.erase(
+                std::remove(unboundInfo_.begin(), unboundInfo_.end(), exchange),
+                unboundInfo_.end());
+            if (pendingInfo_ == exchange) pendingInfo_.reset();
+            return util::Result<DtmfInfoResponse>::failure(
+                makePjError(error, "Call::sendDtmf SIP INFO"));
+        }
+
+        std::unique_lock<std::mutex> lock(infoMutex_);
+        const bool completed = infoCondition_.wait_for(
+            lock, timeout, [&exchange] { return exchange->completed; });
+        if (!completed) {
+            exchange->timedOut = true;
+            exchange->completed = true;
+            exchange->statusCode = PJSIP_SC_REQUEST_TIMEOUT;
+            exchange->statusText = "Request Timeout";
+            unboundInfo_.erase(
+                std::remove(unboundInfo_.begin(), unboundInfo_.end(), exchange),
+                unboundInfo_.end());
+        }
+        if (pendingInfo_ == exchange) pendingInfo_.reset();
+        return util::Result<DtmfInfoResponse>::success(DtmfInfoResponse{
+            exchange->statusCode, exchange->statusText, exchange->timedOut});
+    } catch (const std::exception& error) {
+        try {
+            std::lock_guard<std::mutex> lock(infoMutex_);
+            unboundInfo_.erase(
+                std::remove(unboundInfo_.begin(), unboundInfo_.end(), exchange),
+                unboundInfo_.end());
+            if (pendingInfo_ == exchange) pendingInfo_.reset();
+        } catch (...) {
+        }
+        return util::Result<DtmfInfoResponse>::failure(
+            util::ErrorCode::Runtime,
+            "Falha ao aguardar a resposta do SIP INFO.",
+            error.what());
+    } catch (...) {
+        try {
+            std::lock_guard<std::mutex> lock(infoMutex_);
+            unboundInfo_.erase(
+                std::remove(unboundInfo_.begin(), unboundInfo_.end(), exchange),
+                unboundInfo_.end());
+            if (pendingInfo_ == exchange) pendingInfo_.reset();
+        } catch (...) {
+        }
+        return util::Result<DtmfInfoResponse>::failure(
+            util::ErrorCode::Runtime,
+            "Falha desconhecida ao aguardar a resposta do SIP INFO.");
+    }
 }
 
 std::optional<pj::AudioMedia> SipCall::audioMedia() const
@@ -213,7 +295,12 @@ void SipCall::onCallState(pj::OnCallStateParam&) noexcept
     try {
         const pj::CallInfo information = getInfo();
         disconnected = information.state == PJSIP_INV_STATE_DISCONNECTED;
-        if (disconnected) disconnectAudio();
+        if (disconnected) {
+            failPendingInfo(
+                PJSIP_SC_CALL_TSX_DOES_NOT_EXIST,
+                "Call/Transaction Does Not Exist");
+            disconnectAudio();
+        }
         const auto state = callStateFromPjsip(information.state);
         state_.updateCall(app::CallSnapshot{
             state,
@@ -244,6 +331,10 @@ void SipCall::onCallTsxState(pj::OnCallTsxStateParam& parameter) noexcept
     try {
         if (parameter.e.type != PJSIP_EVENT_TSX_STATE) return;
         const auto& transaction = parameter.e.body.tsxState.tsx;
+        if (transaction.role == PJSIP_ROLE_UAC && transaction.method == "INFO") {
+            handleInfoTransaction(transaction);
+            return;
+        }
         if (transaction.state != PJSIP_TSX_STATE_COMPLETED
             && transaction.state != PJSIP_TSX_STATE_TERMINATED) {
             return;
@@ -262,6 +353,91 @@ void SipCall::onCallTsxState(pj::OnCallTsxStateParam& parameter) noexcept
         publishCallbackFailure("onCallTsxState", error.what());
     } catch (...) {
         publishCallbackFailure("onCallTsxState", "exceção desconhecida");
+    }
+}
+
+void SipCall::handleInfoTransaction(
+    const pj::SipTransaction& transaction) noexcept
+{
+    try {
+        const bool terminal = transaction.state == PJSIP_TSX_STATE_COMPLETED
+            || transaction.state == PJSIP_TSX_STATE_TERMINATED;
+        std::shared_ptr<PendingInfo> exchange;
+        bool completedNow = false;
+        {
+            std::lock_guard<std::mutex> lock(infoMutex_);
+            const auto found = infoTransactions_.find(transaction.pjTransaction);
+            if (found != infoTransactions_.end()) {
+                exchange = found->second;
+            } else if (!unboundInfo_.empty()) {
+                exchange = unboundInfo_.front();
+                unboundInfo_.pop_front();
+                exchange->transaction = transaction.pjTransaction;
+                infoTransactions_.emplace(transaction.pjTransaction, exchange);
+            }
+            if (exchange != nullptr && terminal && !exchange->completed) {
+                exchange->statusCode = transaction.statusCode == 0
+                    ? PJSIP_SC_REQUEST_TIMEOUT
+                    : transaction.statusCode;
+                exchange->statusText = transaction.statusText.empty()
+                    ? "Sem resposta SIP"
+                    : transaction.statusText;
+                exchange->timedOut = exchange->statusCode == PJSIP_SC_REQUEST_TIMEOUT;
+                exchange->completed = true;
+                completedNow = true;
+            }
+            if (transaction.state == PJSIP_TSX_STATE_TERMINATED) {
+                infoTransactions_.erase(transaction.pjTransaction);
+            }
+        }
+        if (!completedNow || exchange == nullptr) return;
+
+        infoCondition_.notify_all();
+        const bool accepted = exchange->statusCode >= 200
+            && exchange->statusCode < 300;
+        static_cast<void>(logger_.log(
+            accepted ? logging::LogLevel::Info : logging::LogLevel::Warning,
+            "dtmf",
+            "SIP INFO respondido: " + std::to_string(exchange->statusCode)
+                + " " + exchange->statusText,
+            {},
+            exchange->correlationId));
+        static_cast<void>(events_.push(app::UiEvent{
+            accepted ? app::UiEventSeverity::Info : app::UiEventSeverity::Warning,
+            "dtmf",
+            "id=" + exchange->correlationId + " INFO: "
+                + std::to_string(exchange->statusCode) + " "
+                + exchange->statusText}));
+    } catch (const pj::Error& error) {
+        publishCallbackFailure("onCallTsxState/INFO", describe(error));
+    } catch (const std::exception& error) {
+        publishCallbackFailure("onCallTsxState/INFO", error.what());
+    } catch (...) {
+        publishCallbackFailure("onCallTsxState/INFO", "exceção desconhecida");
+    }
+}
+
+void SipCall::failPendingInfo(
+    int statusCode,
+    std::string_view statusText) noexcept
+{
+    try {
+        bool changed = false;
+        {
+            std::lock_guard<std::mutex> lock(infoMutex_);
+            if (pendingInfo_ != nullptr && !pendingInfo_->completed) {
+                pendingInfo_->statusCode = statusCode;
+                pendingInfo_->statusText = std::string(statusText);
+                pendingInfo_->completed = true;
+                unboundInfo_.erase(
+                    std::remove(
+                        unboundInfo_.begin(), unboundInfo_.end(), pendingInfo_),
+                    unboundInfo_.end());
+                changed = true;
+            }
+        }
+        if (changed) infoCondition_.notify_all();
+    } catch (...) {
     }
 }
 

@@ -97,9 +97,45 @@ TEST_SUITE("dtmf-plan") {
         polphone::dtmf::DtmfSender sender(calls, state, events, logger);
 
         const auto result = sender.send(polphone::dtmf::DtmfRequest{
-            "5", polphone::dtmf::DtmfMethod::SipInfo, 160U, 100U, -10});
+            "5", polphone::dtmf::DtmfMethod::Inband, 160U, 100U, -10});
         CHECK_FALSE(result);
-        CHECK(result.error().detail == "info");
+        CHECK(result.error().detail == "inband");
         CHECK_FALSE(sender.inFlight());
+    }
+
+    TEST_CASE("traduz respostas finais do SIP INFO")
+    {
+        CHECK(polphone::dtmf::evaluateSipInfoResponse(200, "OK", false));
+        CHECK(polphone::dtmf::evaluateSipInfoResponse(202, "Accepted", false));
+
+        const auto media = polphone::dtmf::evaluateSipInfoResponse(
+            415, "Unsupported Media Type", false);
+        REQUIRE_FALSE(media);
+        CHECK(media.error().message.find("application/dtmf-relay")
+              != std::string::npos);
+
+        const auto dialog = polphone::dtmf::evaluateSipInfoResponse(
+            481, "Call/Transaction Does Not Exist", false);
+        REQUIRE_FALSE(dialog);
+        CHECK(dialog.error().message.find("diálogo SIP") != std::string::npos);
+
+        const auto unsupported = polphone::dtmf::evaluateSipInfoResponse(
+            501, "Not Implemented", false);
+        REQUIRE_FALSE(unsupported);
+        CHECK(unsupported.error().message.find("não implementa")
+              != std::string::npos);
+    }
+
+    TEST_CASE("traduz timeout e rejeição genérica do SIP INFO")
+    {
+        const auto timeout = polphone::dtmf::evaluateSipInfoResponse(
+            408, "Request Timeout", true);
+        REQUIRE_FALSE(timeout);
+        CHECK(timeout.error().message.find("expirou") != std::string::npos);
+
+        const auto rejected = polphone::dtmf::evaluateSipInfoResponse(
+            488, "Not Acceptable Here", false);
+        REQUIRE_FALSE(rejected);
+        CHECK(rejected.error().detail == "488 Not Acceptable Here");
     }
 }

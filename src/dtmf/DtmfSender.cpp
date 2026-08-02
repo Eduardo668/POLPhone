@@ -36,6 +36,46 @@ util::Result<void> unsupportedMethod(DtmfMethod method)
 
 } // namespace
 
+util::Result<void> evaluateSipInfoResponse(
+    int statusCode,
+    std::string_view statusText,
+    bool timedOut)
+{
+    const std::string detail = std::to_string(statusCode) + " "
+        + std::string(statusText);
+    if (!timedOut && statusCode >= 200 && statusCode < 300) {
+        return util::Result<void>::success();
+    }
+    if (timedOut || statusCode == PJSIP_SC_REQUEST_TIMEOUT) {
+        return util::Result<void>::failure(
+            util::ErrorCode::Pjsip,
+            "O SIP INFO expirou sem resposta; verifique a conectividade e o trace SIP.",
+            detail);
+    }
+    switch (statusCode) {
+    case PJSIP_SC_UNSUPPORTED_MEDIA_TYPE:
+        return util::Result<void>::failure(
+            util::ErrorCode::Pjsip,
+            "O PABX rejeitou application/dtmf-relay (415); selecione explicitamente outro método ou ajuste o peer.",
+            detail);
+    case PJSIP_SC_CALL_TSX_DOES_NOT_EXIST:
+        return util::Result<void>::failure(
+            util::ErrorCode::Pjsip,
+            "O diálogo SIP não existe mais (481); confirme se a chamada caiu.",
+            detail);
+    case PJSIP_SC_NOT_IMPLEMENTED:
+        return util::Result<void>::failure(
+            util::ErrorCode::Pjsip,
+            "O peer não implementa DTMF por SIP INFO (501); selecione explicitamente outro método.",
+            detail);
+    default:
+        return util::Result<void>::failure(
+            util::ErrorCode::Pjsip,
+            "O SIP INFO foi rejeitado; consulte o código e o trace SIP.",
+            detail);
+    }
+}
+
 DtmfSender::DtmfSender(
     sip::CallRegistry& calls,
     app::AppState& state,
@@ -210,6 +250,23 @@ util::Result<void> DtmfSender::sendRfc4733(
     }
 }
 
+util::Result<void> DtmfSender::sendSipInfo(
+    sip::SipCall& call,
+    char digit,
+    unsigned durationMs,
+    std::string_view correlationId)
+{
+    const auto response = call.sendDtmfInfo(
+        digit,
+        durationMs,
+        std::string(correlationId));
+    if (!response) return util::Result<void>::failure(response.error());
+    return evaluateSipInfoResponse(
+        response.value().statusCode,
+        response.value().statusText,
+        response.value().timedOut);
+}
+
 std::string DtmfSender::nextCorrelationId()
 {
     const unsigned long long value = sequence_.fetch_add(1U) + 1U;
@@ -222,7 +279,7 @@ util::Result<DtmfResult> DtmfSender::send(const DtmfRequest& request)
 {
     const auto plan = DtmfPlan::build(request.digits, request.durationMs, request.gapMs);
     if (!plan) return util::Result<DtmfResult>::failure(plan.error());
-    if (request.method != DtmfMethod::Rfc4733) {
+    if (request.method == DtmfMethod::Inband) {
         const auto unsupported = unsupportedMethod(request.method);
         return util::Result<DtmfResult>::failure(unsupported.error());
     }
@@ -244,22 +301,24 @@ util::Result<DtmfResult> DtmfSender::send(const DtmfRequest& request)
     if (!active) return util::Result<DtmfResult>::failure(active.error());
     sip::SipCall* call = active.value();
 
-    const auto payloadType = telephoneEventPayloadType(*call);
-    if (!payloadType || payloadType.value() < 0) {
-        static_cast<void>(logger_.log(
-            logging::LogLevel::Warning,
-            "dtmf",
-            "telephone-event não aparece negociado; a tentativa RFC 4733 continuará para obter o erro real.",
-            payloadType ? std::string_view{} : std::string_view(payloadType.error().detail),
-            correlationId));
-    } else {
-        static_cast<void>(logger_.log(
-            logging::LogLevel::Info,
-            "dtmf",
-            "telephone-event negociado para transmissão: PT="
-                + std::to_string(payloadType.value()) + ".",
-            {},
-            correlationId));
+    if (request.method == DtmfMethod::Rfc4733) {
+        const auto payloadType = telephoneEventPayloadType(*call);
+        if (!payloadType || payloadType.value() < 0) {
+            static_cast<void>(logger_.log(
+                logging::LogLevel::Warning,
+                "dtmf",
+                "telephone-event não aparece negociado; a tentativa RFC 4733 continuará para obter o erro real.",
+                payloadType ? std::string_view{} : std::string_view(payloadType.error().detail),
+                correlationId));
+        } else {
+            static_cast<void>(logger_.log(
+                logging::LogLevel::Info,
+                "dtmf",
+                "telephone-event negociado para transmissão: PT="
+                    + std::to_string(payloadType.value()) + ".",
+                {},
+                correlationId));
+        }
     }
 
     std::size_t digitCount = 0U;
@@ -278,6 +337,7 @@ util::Result<DtmfResult> DtmfSender::send(const DtmfRequest& request)
     }
 
     std::size_t digitIndex = 0U;
+    const std::string method = std::string(methodName(request.method));
     for (const auto& step : plan.value()) {
         if (step.kind == DtmfPlanStep::Kind::Pause) {
             std::this_thread::sleep_for(std::chrono::milliseconds(step.pauseMs));
@@ -293,19 +353,21 @@ util::Result<DtmfResult> DtmfSender::send(const DtmfRequest& request)
         static_cast<void>(logger_.log(
             logging::LogLevel::Info,
             "dtmf",
-            "method=rfc4733 idx=" + std::to_string(digitIndex) + "/"
+            "method=" + method + " idx=" + std::to_string(digitIndex) + "/"
                 + std::to_string(digitCount) + " digit=" + std::string(1U, step.digit)
                 + " duration=" + std::to_string(step.onMs) + "ms gap="
                 + std::to_string(step.offMs) + "ms enviando",
             {},
             correlationId));
         const std::uint64_t startedAt = util::monotonicMilliseconds();
-        const auto sent = sendRfc4733(*call, step.digit, step.onMs);
+        const auto sent = request.method == DtmfMethod::Rfc4733
+            ? sendRfc4733(*call, step.digit, step.onMs)
+            : sendSipInfo(*call, step.digit, step.onMs, correlationId);
         if (!sent) {
             static_cast<void>(logger_.log(
                 logging::LogLevel::Error,
                 "dtmf",
-                "method=rfc4733 idx=" + std::to_string(digitIndex) + "/"
+                "method=" + method + " idx=" + std::to_string(digitIndex) + "/"
                     + std::to_string(digitCount) + " digit="
                     + std::string(1U, step.digit) + " status=ERROR",
                 sent.error().detail,
@@ -319,7 +381,7 @@ util::Result<DtmfResult> DtmfSender::send(const DtmfRequest& request)
         static_cast<void>(logger_.log(
             logging::LogLevel::Info,
             "dtmf",
-            "method=rfc4733 idx=" + std::to_string(digitIndex) + "/"
+            "method=" + method + " idx=" + std::to_string(digitIndex) + "/"
                 + std::to_string(digitCount) + " digit=" + std::string(1U, step.digit)
                 + " status=OK elapsed=" + std::to_string(elapsed) + "ms",
             {},
@@ -328,7 +390,8 @@ util::Result<DtmfResult> DtmfSender::send(const DtmfRequest& request)
 
     result.ok = true;
     result.summary = std::to_string(digitCount) + "/" + std::to_string(digitCount)
-        + " dígito(s) enviado(s) por RFC 4733.";
+        + " dígito(s) enviado(s) por "
+        + (request.method == DtmfMethod::Rfc4733 ? "RFC 4733." : "SIP INFO.");
     static_cast<void>(events_.push(app::UiEvent{
         app::UiEventSeverity::Info,
         "dtmf",
