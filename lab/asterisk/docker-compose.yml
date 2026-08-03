@@ -1,0 +1,91 @@
+name: polphone-asterisk-lab
+
+services:
+  asterisk:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        ASTERISK_TAG: "20.19.0"
+        ASTERISK_COMMIT: "f66917fe6da487155f80ab50403bf3d7bdc86183"
+    image: polphone-asterisk-lab:20.19.0-local
+    container_name: polphone-asterisk-lab
+    restart: "no"
+    environment:
+      LAB_ADVERTISED_IP: "${LAB_ADVERTISED_IP:?LAB_ADVERTISED_IP obrigatório}"
+      LAB_CHAN_SIP_HOST_PORT: "${LAB_CHAN_SIP_HOST_PORT:?LAB_CHAN_SIP_HOST_PORT obrigatório}"
+      LAB_PJSIP_HOST_PORT: "${LAB_PJSIP_HOST_PORT:?LAB_PJSIP_HOST_PORT obrigatório}"
+      LAB_RTP_START: "${LAB_RTP_START:?LAB_RTP_START obrigatório}"
+      LAB_RTP_END: "${LAB_RTP_END:?LAB_RTP_END obrigatório}"
+      LAB_SIP_1001_SECRET: "${LAB_SIP_1001_SECRET:?LAB_SIP_1001_SECRET obrigatório}"
+      LAB_SIP_1002_SECRET: "${LAB_SIP_1002_SECRET:?LAB_SIP_1002_SECRET obrigatório}"
+      LAB_PJSIP_2001_SECRET: "${LAB_PJSIP_2001_SECRET:?LAB_PJSIP_2001_SECRET obrigatório}"
+    networks:
+      - lab_internal
+    volumes:
+      - ./config:/opt/polphone-lab/config:ro
+    read_only: true
+    tmpfs:
+      - /etc/asterisk:uid=10001,gid=10001,mode=0750
+      - /run/asterisk:uid=10001,gid=10001,mode=0750
+      - /var/cache/asterisk:uid=10001,gid=10001,mode=0750
+      - /var/log/asterisk:uid=10001,gid=10001,mode=0750
+      - /var/spool/asterisk:uid=10001,gid=10001,mode=0750
+      - /tmp:uid=10001,gid=10001,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    stop_grace_period: 15s
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/healthcheck.sh"]
+      interval: 5s
+      timeout: 4s
+      start_period: 20s
+      retries: 12
+
+  gateway:
+    image: polphone-asterisk-lab:20.19.0-local
+    container_name: polphone-asterisk-lab-gateway
+    restart: "no"
+    entrypoint: ["/usr/local/bin/gateway.sh"]
+    environment:
+      LAB_RTP_START: "${LAB_RTP_START:?LAB_RTP_START obrigatório}"
+      LAB_RTP_END: "${LAB_RTP_END:?LAB_RTP_END obrigatório}"
+    ports:
+      - "${LAB_BIND_IP:?LAB_BIND_IP obrigatório}:${LAB_CHAN_SIP_HOST_PORT}:5060/udp"
+      - "${LAB_BIND_IP:?LAB_BIND_IP obrigatório}:${LAB_PJSIP_HOST_PORT}:5061/udp"
+      - "${LAB_BIND_IP:?LAB_BIND_IP obrigatório}:${LAB_RTP_START}-${LAB_RTP_END}:${LAB_RTP_START}-${LAB_RTP_END}/udp"
+    depends_on:
+      asterisk:
+        condition: service_healthy
+    networks:
+      - lab_internal
+      - lab_edge
+    read_only: true
+    tmpfs:
+      - /tmp:uid=10001,gid=10001,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    stop_grace_period: 10s
+    healthcheck:
+      test: ["CMD-SHELL", "grep -aq gateway.sh /proc/1/cmdline"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+networks:
+  lab_internal:
+    name: polphone-asterisk-lab-net
+    driver: bridge
+    internal: true
+  lab_edge:
+    name: polphone-asterisk-lab-edge
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.enable_ip_masquerade: "false"
+      com.docker.network.bridge.enable_icc: "false"

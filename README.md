@@ -178,6 +178,13 @@ validação comprova o binário e o roteiro, não substitui o ensaio de campo.
 Capturas `.pcap`/`.pcapng`, logs SIP/RTP, credenciais e números reais devem ficar fora do repositório.
 Na documentação versionada, use somente aliases de destino e resultados sanitizados.
 
+## Asterisk DTMF Lab
+
+O laboratório opcional em `lab/asterisk/` constrói localmente um Asterisk 20.19.0 isolado, sem
+troncos ou rotas externas, para testar registro fictício, eco de áudio e os três métodos DTMF antes
+de qualquer ensaio autorizado em infraestrutura real. Ele não participa do build normal do
+POLPhone. Veja [`docs/LAB-ASTERISK-GUIDE.md`](docs/LAB-ASTERISK-GUIDE.md).
+
 ## Documentação
 
 Arquitetura, ordem de implementação e decisões estão em `docs/`. Esses documentos são normativos para o projeto.

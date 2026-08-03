@@ -1,0 +1,55 @@
+{
+  "$schema": "./polphone.config.schema.json",
+  "sip": {
+    "idUri": "sip:1001@127.0.0.1",
+    "registrarUri": "sip:127.0.0.1:15060",
+    "realm": "*",
+    "username": "1001",
+    "password": "REPLACE_WITH_LAB_SIP_1001_SECRET",
+    "domain": "127.0.0.1",
+    "proxyUri": "",
+    "regTimeoutSec": 300,
+    "regRetryIntervalSec": 10,
+    "registerOnStartup": true
+  },
+  "network": {
+    "localPort": 0,
+    "boundAddress": "",
+    "transport": "udp"
+  },
+  "audio": {
+    "captureDevice": "",
+    "playbackDevice": "",
+    "clockRate": 8000,
+    "channelCount": 1,
+    "ptimeMs": 20,
+    "ecTailMs": 200,
+    "quality": 8,
+    "noVad": true
+  },
+  "codecs": {
+    "priority": {
+      "PCMU/8000/1": 254,
+      "PCMA/8000/1": 253,
+      "G722/16000/1": 0,
+      "speex/8000/1": 0,
+      "iLBC/8000/1": 0,
+      "GSM/8000/1": 0
+    }
+  },
+  "dtmf": {
+    "defaultMethod": "rfc4733",
+    "durationMs": 160,
+    "gapMs": 100,
+    "volumeDbm0": -10,
+    "localFeedback": false,
+    "logDigits": false
+  },
+  "logging": {
+    "consoleLevel": 4,
+    "fileLevel": 5,
+    "directory": "logs/lab",
+    "maxFileMB": 50,
+    "sipMessageTrace": true
+  }
+}

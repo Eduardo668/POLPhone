@@ -1,0 +1,9 @@
+.env
+data/*
+!data/.gitkeep
+logs/*
+!logs/.gitkeep
+captures/*
+!captures/.gitkeep
+*.pcap
+*.pcapng

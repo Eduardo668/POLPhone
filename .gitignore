@@ -17,6 +17,13 @@ config/*.local.json
 
 # Logs, dumps e capturas de diagnóstico
 /logs/
+/lab/asterisk/.env
+/lab/asterisk/data/*
+!/lab/asterisk/data/.gitkeep
+/lab/asterisk/logs/*
+!/lab/asterisk/logs/.gitkeep
+/lab/asterisk/captures/*
+!/lab/asterisk/captures/.gitkeep
 *.log
 *.dmp
 *.mdmp
@@ -25,6 +32,9 @@ core.*
 *.pcap
 *.pcapng
 *.cap
+
+# Configuração local do laboratório Asterisk
+/config/polphone.config.lab.json
 
 # Builds e arquivos gerados pelo CMake
 /build/
