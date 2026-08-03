@@ -28,14 +28,13 @@
 
 namespace polphone::app {
 
-class ConsoleUi;
-
 struct ApplicationOptions {
     std::filesystem::path configPath{"config/polphone.config.json"};
     std::optional<int> consoleLogLevel;
     bool selftest{false};
     bool listDevices{false};
     bool useBuiltInConfig{false};
+    bool enableConsoleLogging{true};
 };
 
 struct ApplicationStatus {
@@ -46,6 +45,8 @@ struct ApplicationStatus {
     config::DtmfConfig dtmf;
     std::string dtmfMethod;
     int consoleLogLevel{0};
+    bool mediaActive{false};
+    bool muted{false};
 };
 
 class Application final {
@@ -60,7 +61,9 @@ public:
     [[nodiscard]] int run();
     [[nodiscard]] util::Result<void> makeCall(std::string_view destination);
     [[nodiscard]] util::Result<void> answerCall();
+    [[nodiscard]] util::Result<void> rejectCall();
     [[nodiscard]] util::Result<void> hangupCall();
+    [[nodiscard]] util::Result<void> setMuted(bool muted);
     [[nodiscard]] util::Result<void> setRegistrationEnabled(bool enabled);
     [[nodiscard]] util::Result<std::vector<audio::AudioDeviceDescription>>
         listAudioDevices() const;
@@ -100,7 +103,6 @@ private:
     sip::CallRegistry calls_;
     std::unique_ptr<sip::SipAccount> account_;
     std::unique_ptr<dtmf::DtmfSender> dtmfSender_;
-    std::unique_ptr<ConsoleUi> console_;
     std::string dtmfMethod_;
     int consoleLogLevel_{0};
     bool initialized_{false};

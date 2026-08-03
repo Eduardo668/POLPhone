@@ -157,7 +157,6 @@ target_compile_options(polphone_audio PRIVATE
 )
 
 add_library(polphone_dtmf STATIC
-    src/dtmf/DtmfPlan.cpp
     src/dtmf/DtmfRequestGate.cpp
     src/dtmf/DtmfSender.cpp
 )
@@ -181,13 +180,119 @@ target_compile_options(polphone_dtmf PRIVATE
     $<$<CONFIG:Release>:/O2;/Zi>
 )
 
-add_library(polphone_app STATIC
+# Regras de plano DTMF são puras para que o backend de demonstração não
+# inclua nem vincule PJSIP.
+add_library(polphone_dtmf_plan STATIC
+    src/dtmf/DtmfPlan.cpp
+)
+target_include_directories(polphone_dtmf_plan PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_link_libraries(polphone_dtmf_plan PRIVATE polphone_warnings)
+target_compile_options(polphone_dtmf_plan PRIVATE
+    $<$<CONFIG:Debug>:/Zi;/Od;/RTC1>
+    $<$<CONFIG:Release>:/O2;/Zi>
+)
+target_link_libraries(polphone_dtmf PUBLIC polphone_dtmf_plan)
+
+add_library(polphone_engine STATIC
     src/app/Application.cpp
+)
+target_include_directories(polphone_engine PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_compile_definitions(polphone_engine PRIVATE
+    WIN32_LEAN_AND_MEAN NOMINMAX _WIN32_WINNT=0x0A00
+    _CRT_SECURE_NO_WARNINGS _WINSOCK_DEPRECATED_NO_WARNINGS
+    UNICODE _UNICODE PJ_WIN32=1 PJ_M_X86_64=1
+)
+target_link_libraries(polphone_engine
+    PUBLIC polphone_audio polphone_config polphone_dtmf polphone_logging polphone_sip polphone_state
+    PRIVATE polphone_warnings
+)
+target_compile_options(polphone_engine PRIVATE
+    $<$<CONFIG:Debug>:/Zi;/Od;/RTC1>
+    $<$<CONFIG:Release>:/O2;/Zi>
+)
+
+add_library(polphone_telephony STATIC
+    src/core/TelephonyTypes.cpp
+    src/core/Presentation.cpp
+    src/core/MockTelephonyBackend.cpp
+    src/core/PolPhoneController.cpp
+)
+target_include_directories(polphone_telephony PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_link_libraries(polphone_telephony
+    PUBLIC polphone_util polphone_logging polphone_dtmf_plan
+    PRIVATE polphone_warnings
+)
+target_compile_options(polphone_telephony PRIVATE
+    $<$<CONFIG:Debug>:/Zi;/Od;/RTC1>
+    $<$<CONFIG:Release>:/O2;/Zi>
+)
+
+add_library(polphone_real_backend STATIC
+    src/core/RealTelephonyBackend.cpp
+    src/core/ControllerFactory.cpp
+)
+target_include_directories(polphone_real_backend PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_compile_definitions(polphone_real_backend PRIVATE
+    WIN32_LEAN_AND_MEAN NOMINMAX _WIN32_WINNT=0x0A00
+    _CRT_SECURE_NO_WARNINGS _WINSOCK_DEPRECATED_NO_WARNINGS
+    UNICODE _UNICODE PJ_WIN32=1 PJ_M_X86_64=1
+)
+target_link_libraries(polphone_real_backend
+    PUBLIC polphone_engine polphone_telephony
+    PRIVATE polphone_warnings
+)
+target_compile_options(polphone_real_backend PRIVATE
+    $<$<CONFIG:Debug>:/Zi;/Od;/RTC1>
+    $<$<CONFIG:Release>:/O2;/Zi>
+)
+
+# DLL de fronteira consumida pelo projeto WinUI/MSBuild. Ela encapsula todas
+# as dependências transitivas do motor; a GUI vincula apenas a import library.
+add_library(polphone_core_runtime SHARED
+    src/core/TelephonyTypes.cpp
+    src/core/Presentation.cpp
+    src/core/MockTelephonyBackend.cpp
+    src/core/PolPhoneController.cpp
+    src/core/RealTelephonyBackend.cpp
+    src/core/ControllerFactory.cpp
+    src/core/SettingsService.cpp
+)
+target_include_directories(polphone_core_runtime PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_compile_definitions(polphone_core_runtime PRIVATE
+    POLPHONE_CORE_SHARED_EXPORTS
+    WIN32_LEAN_AND_MEAN NOMINMAX _WIN32_WINNT=0x0A00
+    _CRT_SECURE_NO_WARNINGS _WINSOCK_DEPRECATED_NO_WARNINGS
+    UNICODE _UNICODE PJ_WIN32=1 PJ_M_X86_64=1
+)
+target_link_libraries(polphone_core_runtime PRIVATE
+    polphone_engine polphone_audio polphone_config polphone_dtmf polphone_dtmf_plan
+    polphone_logging polphone_pjsip_logging polphone_sip polphone_state polphone_util
+    PJSIP::pjsua2 nlohmann_json polphone_warnings
+)
+target_compile_options(polphone_core_runtime PRIVATE
+    $<$<CONFIG:Debug>:/Zi;/Od;/RTC1>
+    $<$<CONFIG:Release>:/O2;/Zi>
+)
+set_target_properties(polphone_core_runtime PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/$<CONFIG>"
+    ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/$<CONFIG>"
+    PDB_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/$<CONFIG>"
+)
+
+# Fachada agregadora do motor compartilhado. O mock permanece isolado no alvo
+# polphone_telephony e, portanto, não herda PJSIP.
+add_library(polphone_core INTERFACE)
+target_link_libraries(polphone_core INTERFACE
+    polphone_engine polphone_telephony polphone_real_backend polphone_audio polphone_config
+    polphone_dtmf polphone_logging polphone_sip polphone_state
+)
+
+add_library(polphone_cli_ui STATIC
     src/app/CommandParser.cpp
     src/app/ConsoleUi.cpp
 )
-target_include_directories(polphone_app PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
-target_compile_definitions(polphone_app PRIVATE
+target_include_directories(polphone_cli_ui PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_compile_definitions(polphone_cli_ui PRIVATE
     WIN32_LEAN_AND_MEAN
     NOMINMAX
     _WIN32_WINNT=0x0A00
@@ -198,17 +303,20 @@ target_compile_definitions(polphone_app PRIVATE
     PJ_WIN32=1
     PJ_M_X86_64=1
 )
-target_link_libraries(polphone_app
-    PUBLIC polphone_audio polphone_config polphone_dtmf polphone_logging polphone_sip polphone_state
+target_link_libraries(polphone_cli_ui
+    PUBLIC polphone_core
     PRIVATE polphone_warnings
 )
-target_compile_options(polphone_app PRIVATE
+target_compile_options(polphone_cli_ui PRIVATE
     $<$<CONFIG:Debug>:/Zi;/Od;/RTC1>
     $<$<CONFIG:Release>:/O2;/Zi>
 )
 
-add_executable(polphone src/main.cpp)
-target_compile_definitions(polphone PRIVATE
+add_library(polphone_app INTERFACE)
+target_link_libraries(polphone_app INTERFACE polphone_core polphone_cli_ui)
+
+add_executable(polphone_cli src/main.cpp)
+target_compile_definitions(polphone_cli PRIVATE
     WIN32_LEAN_AND_MEAN
     NOMINMAX
     _CRT_SECURE_NO_WARNINGS
@@ -218,7 +326,7 @@ target_compile_definitions(polphone PRIVATE
     PJ_WIN32=1
     PJ_M_X86_64=1
 )
-target_link_libraries(polphone PRIVATE
+target_link_libraries(polphone_cli PRIVATE
     PJSIP::pjsua2
     nlohmann_json
     polphone_util
@@ -228,19 +336,20 @@ target_link_libraries(polphone PRIVATE
     polphone_pjsip_logging
     polphone_sip
     polphone_audio
-    polphone_app
+    polphone_core
+    polphone_cli_ui
     polphone_warnings
 )
-target_compile_options(polphone PRIVATE
+target_compile_options(polphone_cli PRIVATE
     $<$<CONFIG:Debug>:/Zi;/Od;/RTC1>
     $<$<CONFIG:Release>:/O2;/Zi>
 )
-target_link_options(polphone PRIVATE $<$<CONFIG:Release>:/DEBUG;/OPT:REF;/OPT:ICF>)
-set_target_properties(polphone PROPERTIES
+target_link_options(polphone_cli PRIVATE $<$<CONFIG:Release>:/DEBUG;/OPT:REF;/OPT:ICF>)
+set_target_properties(polphone_cli PROPERTIES
     PDB_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/$<CONFIG>"
     VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
 )
-set_property(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" PROPERTY VS_STARTUP_PROJECT polphone)
+set_property(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" PROPERTY VS_STARTUP_PROJECT polphone_cli)
 
 if(POLPHONE_BUILD_TESTS)
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/CMakeLists.txt")

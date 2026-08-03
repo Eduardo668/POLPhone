@@ -8,7 +8,6 @@
 
 #include "app/Application.h"
 
-#include "app/ConsoleUi.h"
 #include "audio/ToneGenerator.h"
 #include "config/ConfigLoader.h"
 #include "config/ConfigValidator.h"
@@ -65,20 +64,22 @@ util::Result<void> Application::initialize()
 
     const int consoleLevelNumber =
         options_.consoleLogLevel.value_or(config_->logging.consoleLevel);
-    try {
-        consoleSink_ = std::make_shared<logging::ConsoleLogSink>(std::cout);
-    } catch (...) {
-        return failInitialization(util::Error{
-            util::ErrorCode::Runtime,
-            "Falha ao reservar o console de log; libere memória e tente novamente.",
-            {}});
-    }
-    if (!logger_.addSink(
-            consoleSink_, logging::logLevelFromNumber(consoleLevelNumber))) {
-        return failInitialization(util::Error{
-            util::ErrorCode::Runtime,
-            "Falha ao inicializar o console de log; verifique a saída padrão.",
-            "Logger::addSink"});
+    if (options_.enableConsoleLogging) {
+        try {
+            consoleSink_ = std::make_shared<logging::ConsoleLogSink>(std::cout);
+        } catch (...) {
+            return failInitialization(util::Error{
+                util::ErrorCode::Runtime,
+                "Falha ao reservar o console de log; libere memória e tente novamente.",
+                {}});
+        }
+        if (!logger_.addSink(
+                consoleSink_, logging::logLevelFromNumber(consoleLevelNumber))) {
+            return failInitialization(util::Error{
+                util::ErrorCode::Runtime,
+                "Falha ao inicializar o console de log; verifique a saída padrão.",
+                "Logger::addSink"});
+        }
     }
     consoleLogLevel_ = consoleLevelNumber;
     dtmfMethod_ = config_->dtmf.defaultMethod;
@@ -92,7 +93,9 @@ util::Result<void> Application::initialize()
         maxFileBytes);
     if (!logFile) {
         static_cast<void>(logger_.warning(
-            "logging", "Arquivo de log indisponível; continuando somente no console."));
+            "logging", options_.enableConsoleLogging
+                ? "Arquivo de log indisponível; continuando somente no console."
+                : "Arquivo de log indisponível; continuando sem persistência de log."));
     }
     if (config_->dtmf.logDigits) {
         static_cast<void>(logger_.warning(
@@ -189,20 +192,6 @@ util::Result<void> Application::initialize()
             !result) {
             return failInitialization(result.error());
         }
-        try {
-            console_ = std::make_unique<ConsoleUi>(
-                *this, std::cin, std::cout, std::cerr);
-        } catch (const std::exception& error) {
-            return failInitialization(util::Error{
-                util::ErrorCode::Runtime,
-                "Não foi possível reservar o console interativo.",
-                error.what()});
-        } catch (...) {
-            return failInitialization(util::Error{
-                util::ErrorCode::Runtime,
-                "Falha desconhecida ao reservar o console interativo.",
-                {}});
-        }
     }
 
     initialized_ = true;
@@ -259,7 +248,6 @@ int Application::run()
         static_cast<void>(logger_.info(
             "app", "Selftest do endpoint, transporte e codecs concluído com sucesso."));
     }
-    if (console_ != nullptr) return console_->run();
     static_cast<void>(calls_.reap());
     for (const auto& event : events_.drain()) {
         const auto level = event.severity == UiEventSeverity::Error
@@ -321,6 +309,17 @@ util::Result<void> Application::answerCall()
     return call->answer(PJSIP_SC_OK);
 }
 
+util::Result<void> Application::rejectCall()
+{
+    sip::SipCall* call = calls_.current();
+    if (call == nullptr || state_.call().state != CallState::Incoming) {
+        return util::Result<void>::failure(
+            util::ErrorCode::Runtime,
+            "Não existe chamada recebida para rejeitar.");
+    }
+    return call->answer(PJSIP_SC_DECLINE);
+}
+
 util::Result<void> Application::hangupCall()
 {
     sip::SipCall* call = calls_.current();
@@ -330,6 +329,17 @@ util::Result<void> Application::hangupCall()
             "Não existe chamada ativa para encerrar.");
     }
     return call->hangupCall();
+}
+
+util::Result<void> Application::setMuted(bool muted)
+{
+    sip::SipCall* call = calls_.current();
+    if (call == nullptr) {
+        return util::Result<void>::failure(
+            util::ErrorCode::Runtime,
+            "Não existe chamada ativa para alterar o mudo.");
+    }
+    return call->setMuted(muted);
 }
 
 util::Result<void> Application::setRegistrationEnabled(bool enabled)
@@ -385,7 +395,8 @@ util::Result<void> Application::setConsoleLogLevel(int level)
             util::ErrorCode::InvalidArgument,
             "O nível de log deve estar entre 0 e 6.");
     }
-    if (!logger_.setSinkLevel(consoleSink_, logging::logLevelFromNumber(level))) {
+    if (consoleSink_ == nullptr
+        || !logger_.setSinkLevel(consoleSink_, logging::logLevelFromNumber(level))) {
         return util::Result<void>::failure(
             util::ErrorCode::Runtime,
             "Não foi possível alterar o nível do console de log.");
@@ -500,6 +511,10 @@ ApplicationStatus Application::status() const
         snapshot.dtmfMethod = dtmfMethod_;
     }
     snapshot.consoleLogLevel = consoleLogLevel_;
+    if (sip::SipCall* call = calls_.current(); call != nullptr) {
+        snapshot.mediaActive = call->hasActiveAudio();
+        snapshot.muted = call->isMuted();
+    }
     return snapshot;
 }
 
@@ -519,7 +534,6 @@ void Application::shutdown() noexcept
     if (shutdownStarted_) return;
     shutdownStarted_ = true;
     initialized_ = false;
-    console_.reset();
     dtmfSender_.reset();
 
     if (sip::SipCall* call = calls_.current(); call != nullptr) {

@@ -26,7 +26,7 @@ Na raiz do repositório, em PowerShell:
 ```powershell
 .\scripts\verify-env.ps1
 .\scripts\build.ps1 -Config Release
-.\build\Release\polphone.exe --version
+.\build\Release\polphone_cli.exe --version
 Copy-Item .\config\polphone.config.example.json .\config\polphone.config.json
 ```
 
@@ -41,7 +41,7 @@ Edite apenas o arquivo local ignorado `config\polphone.config.json`:
 Valide o bootstrap antes de usar credenciais reais:
 
 ```powershell
-.\build\Release\polphone.exe --config .\config\polphone.config.json --selftest
+.\build\Release\polphone_cli.exe --config .\config\polphone.config.json --selftest
 ```
 
 O comando deve retornar `0` e terminar o log com `encerramento concluído`.
@@ -69,7 +69,7 @@ usado. Ao final, desabilite o debug para não coletar tráfego além do ensaio.
 Inicie o console:
 
 ```powershell
-.\build\Release\polphone.exe --config .\config\polphone.config.json
+.\build\Release\polphone_cli.exe --config .\config\polphone.config.json
 ```
 
 Faça uma chamada ao destino interno de eco/`Read()` e, após `CONFIRMED` com mídia ativa, execute

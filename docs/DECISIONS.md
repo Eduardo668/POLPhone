@@ -1064,3 +1064,47 @@
   2. **Não usar wrapper** — rejeitada: repetiria `try/catch` e facilitaria exceções escaparem da borda.
   3. **Chamar apenas a função `pjTry`** — válida, mas a macro prefixada mantém a expressão original no
      diagnóstico sem conflitar com o upstream.
+
+---
+
+## ADR-025 — WinUI 3 com C++/WinRT e execução unpackaged
+
+- **Status:** Aceito — 2026-08-02
+- **Contexto:** a aplicação precisa de uma interface Windows moderna sem reescrever o motor C++ nem
+  introduzir runtime web ou .NET. A distribuição futura deve ser compatível com Intune.
+- **Decisão:** usar WinUI 3 com C++/WinRT em projeto MSBuild separado, inicialmente unpackaged e
+  self-contained. MSIX fica fora desta etapa.
+- **Consequências:** integração nativa e caminho futuro para MSIX; o build requer Windows App SDK,
+  C++/WinRT e o componente `Microsoft.VisualStudio.ComponentGroup.WindowsAppDevelopment.VC.BuildTools` do VS2022.
+- **Alternativas rejeitadas:** Electron/WebView, Qt, C#, Dear ImGui e Win32 puro, por divergirem dos
+  requisitos, duplicarem tecnologia ou oferecerem experiência menos adequada ao produto.
+
+---
+
+## ADR-026 — Backend real e mock sob a mesma fachada
+
+- **Status:** Aceito — 2026-08-02
+- **Contexto:** o fluxo visual deve ser testável sem PABX, mas a UI não pode depender de objetos ou
+  callbacks PJSIP.
+- **Decisão:** `PolPhoneController` consome `TelephonyBackend`. `RealTelephonyBackend` adapta o motor
+  existente e `MockTelephonyBackend` implementa uma máquina de estados determinística sem PJSIP ou
+  rede. Ambos publicam `TelephonySnapshot` e usam as mesmas operações de alto nível.
+- **Consequências:** UI e testes não conhecem PJSIP; a CLI continua usando o mesmo motor. O mock
+  comprova somente regras e transições simuladas, nunca interoperabilidade real.
+- **Alternativas rejeitadas:** condicionais demo dentro da janela e simulação dentro do adaptador
+  PJSIP, pois acoplariam apresentação, teste e infraestrutura.
+
+---
+
+## ADR-027 — Identidade branca/azul e recursos visuais centralizados
+
+- **Status:** Aceito — 2026-08-02
+- **Contexto:** a identidade POL exige uso consistente do azul `#0a3b68`, contraste e estados que
+  não dependam exclusivamente de cor.
+- **Decisão:** centralizar a paleta em `gui/Theme.h`. Superfícies são claras, botões principais usam
+  `#0a3b68`, variações e cores semânticas são discretas. Estados incluem sempre texto/controle; o
+  Modo URA usa toggle, seletor e o texto “Modo URA ativo”.
+- **Consequências:** não há literais de identidade espalhados nos componentes, e futuras variações
+  de tema têm um único ponto de alteração. A inspeção de contraste e DPI continua sendo teste manual.
+- **Alternativas rejeitadas:** cores inline por controle e tema escuro padrão, por dificultarem
+  consistência, auditoria e uso corporativo prolongado.

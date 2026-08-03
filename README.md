@@ -1,6 +1,6 @@
 # POLPhone
 
-POLPhone é uma prova técnica de softphone SIP para Windows x64, escrita em C++17 sobre PJSIP/PJSUA2 2.17. O MVP é operado por console e existe para comparar, de forma explícita e auditável, métodos de DTMF em chamadas SIP.
+POLPhone é um softphone SIP nativo para Windows x64, escrito em C++17 sobre PJSIP/PJSUA2 2.17. O motor continua disponível pelo console e agora possui uma primeira interface WinUI 3 em C++/WinRT. O modo de demonstração permite validar o fluxo funcional da interface sem PABX, rede ou credenciais SIP.
 
 O repositório já contém o build reproduzível do pjproject, utilitários base, testes unitários, logging estruturado com redaction, configuração JSON, ciclo de vida completo do endpoint, transporte SIP UDP, seleção dos dispositivos de áudio WMME, registro de uma conta SIP, chamadas com áudio bidirecional, console interativo e envio DTMF explícito pelos três métodos: RFC 4733, SIP INFO e in-band.
 
@@ -29,19 +29,30 @@ O repositório já contém o build reproduzível do pjproject, utilitários base
 - logging em console e arquivo, com níveis independentes e rotação;
 - mascaramento de credenciais, autenticação SIP e números externos nos logs;
 - testes unitários dos utilitários, da configuração e das regras de redaction.
+- biblioteca `polphone_core` compartilhada pela CLI e pela GUI, com fachada assíncrona;
+- interface WinUI 3 branca e azul, com telefone, chamada recebida, teclado, Modo URA,
+  configurações validadas e diagnóstico sanitizado;
+- backend de demonstração determinístico (`polphone.exe --demo`) sem PJSIP ou rede;
+- 128 testes e 710 asserções independentes de uma janela WinUI ou de um PABX.
 
 ## Fora do escopo
 
-O MVP não inclui interface gráfica, contatos, histórico, gravação, transferência, conferência, vídeo, presença, mensagens, TLS/SRTP, STUN/TURN/ICE, múltiplas contas, múltiplas chamadas, instalador ou atualização automática.
+Ainda não há contatos, histórico, gravação, transferência, conferência, vídeo, presença, mensagens,
+TLS/SRTP, STUN/TURN/ICE, múltiplas contas, múltiplas chamadas, MSIX, instalador ou atualização
+automática. O modo demo não prova interoperabilidade SIP, áudio ou DTMF em uma URA real.
 
 ## Pré-requisitos
 
 - Windows 10/11 x64;
 - Visual Studio 2022 17.8+ com o workload **Desenvolvimento para desktop com C++**;
+- componente **C++ WinUI app development tools**
+  (`Microsoft.VisualStudio.ComponentGroup.WindowsAppDevelopment.VC.BuildTools`), necessário somente para a GUI;
 - MSVC v143 e Windows SDK 10.0.22621.0 ou compatível (mínimo 10.0.19041.0);
 - CMake 3.21+;
 - Git 2.30+ com suporte a submodules;
 - PowerShell 5.1 ou 7.x.
+- acesso ao NuGet na primeira restauração da GUI. O projeto fixa Windows App SDK
+  `1.6.250205002` e C++/WinRT `2.0.240405.15`.
 
 O build Release usa o runtime `/MD` e, em outra máquina, requer o **Microsoft Visual C++ Redistributable 2015–2022 x64**. Builds Debug usam `/MDd` e não são redistribuíveis.
 
@@ -84,8 +95,10 @@ Execute a partir da raiz do repositório:
 Copy-Item config\polphone.config.example.json config\polphone.config.json
 .\scripts\build.ps1 -Config Debug
 .\scripts\build.ps1 -Config Release
-.\build\Release\polphone.exe --version
-.\build\Release\polphone.exe --config .\config\polphone.config.json --selftest
+.\build\Release\polphone_cli.exe --version
+.\build\Release\polphone_cli.exe --config .\config\polphone.config.json --selftest
+.\scripts\build-gui.ps1 -Config Debug
+.\scripts\build-gui.ps1 -Config Release
 ```
 
 O pjproject é compilado por sua solução oficial `pjproject-vs14.sln` com MSBuild, configurações `Debug-Dynamic|x64` e `Release-Dynamic|x64`, toolset v143. O CMake gera apenas a solução do POLPhone; o sistema CMake experimental do pjproject não é utilizado.
@@ -96,16 +109,16 @@ A solução gerada `build/POLPhone.sln` é descartável. Faça alterações nos 
 
 `config/polphone.config.json` é local e ignorado pelo Git. Copie o exemplo e substitua os marcadores apenas na sua máquina. Todos os campos têm defaults; chaves desconhecidas geram aviso e valores inválidos são rejeitados com o caminho do campo. Nunca versione credenciais, logs, dumps ou capturas SIP/RTP.
 
-Para validar somente o bootstrap e a configuração, sem registrar uma conta SIP:
+Para validar somente o bootstrap e a configuração pela CLI, sem registrar uma conta SIP:
 
 ```powershell
-.\build\Release\polphone.exe --config .\config\polphone.config.json --selftest
+.\build\Release\polphone_cli.exe --config .\config\polphone.config.json --selftest
 ```
 
 Para iniciar o console operacional:
 
 ```powershell
-.\build\Release\polphone.exe --config .\config\polphone.config.json
+.\build\Release\polphone_cli.exe --config .\config\polphone.config.json
 ```
 
 Use `help` para listar todos os comandos. O fluxo básico é `status`, `call <destino>`, `answer`,
@@ -138,7 +151,7 @@ volume in-band. Uma segunda requisição enquanto outra está em voo é recusada
 Para listar os dispositivos sem exigir um arquivo de configuração local:
 
 ```powershell
-.\build\Release\polphone.exe --list-devices
+.\build\Release\polphone_cli.exe --list-devices
 ```
 
 Os campos `audio.captureDevice` e `audio.playbackDevice` aceitam uma parte não ambígua do nome ou
@@ -148,8 +161,34 @@ Para compilar e executar os testes unitários:
 
 ```powershell
 .\scripts\build.ps1 -Config Debug -Tests
-.\build\Debug\polphone_tests.exe
+.\scripts\test.ps1 -Config Debug
 ```
+
+## Interface gráfica e modo de demonstração
+
+A GUI é unpackaged e gera `build\gui\<Config>\polphone.exe`. Para compilar e executar o modo
+seguro, sem ler ou alterar a configuração SIP real:
+
+```powershell
+.\scripts\verify-env.ps1 -Gui
+.\scripts\build-gui.ps1 -Config Debug
+.\scripts\run-demo.ps1 -Config Debug
+```
+
+Também é possível definir `POLPHONE_DEMO=1` durante o desenvolvimento. A opção ou variável escolhe
+o `MockTelephonyBackend`; ele não abre sockets, não inicializa PJSIP e não grava credenciais. O painel
+“Cenários de demonstração” oferece chamada recebida, falha de registro, falha de chamada e perda de
+conexão. Registro, chamada de saída, áudio simulado, cronômetro, mudo, DTMF e desligamento seguem os
+controles normais.
+
+Sem `--demo`, a GUI usa `config\polphone.config.json` ou o caminho informado por `--config`. As
+alterações da tela de configurações passam pelo `ConfigValidator`, são escritas via arquivo temporário
+e exigem reinício do aplicativo para recriar o motor SIP. A senha permanece mascarada e não entra em
+logs nem no diagnóstico.
+
+A identidade visual está centralizada em `gui/Theme.h`; a cor principal é exatamente `#0a3b68`.
+Detalhes da separação de processos, threads e ciclo de vida estão em
+[`docs/GUI-ARCHITECTURE.md`](docs/GUI-ARCHITECTURE.md).
 
 ## Diagnóstico e encerramento
 

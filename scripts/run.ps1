@@ -9,7 +9,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
 $repoRoot = [IO.Path]::GetFullPath((Resolve-Path (Join-Path $PSScriptRoot "..")).ProviderPath)
-$executable = Join-Path $repoRoot "build\$Config\polphone.exe"
+$executable = Join-Path $repoRoot "build\$Config\polphone_cli.exe"
 $logsDirectory = Join-Path $repoRoot "logs"
 
 if (-not (Test-Path $executable -PathType Leaf)) {

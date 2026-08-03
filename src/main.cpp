@@ -9,6 +9,7 @@
 #include <pj/config.h>
 
 #include "app/Application.h"
+#include "app/ConsoleUi.h"
 #include "app/ExitCodes.h"
 #include "util/Result.h"
 #include "util/Strings.h"
@@ -30,8 +31,8 @@ void printVersion()
 
 void printUsage()
 {
-    std::cout << "Uso: polphone.exe [--version]\n"
-              << "     polphone.exe [--config <caminho>] [--selftest | --list-devices]"
+    std::cout << "Uso: polphone_cli.exe [--version]\n"
+              << "     polphone_cli.exe [--config <caminho>] [--selftest | --list-devices]"
                  " [--log-level 0..6]\n";
 }
 
@@ -127,12 +128,17 @@ int main(int argc, char* argv[])
     }
     options.useBuiltInConfig = options.listDevices && !configWasSpecified;
 
+    const bool interactive = !options.selftest && !options.listDevices;
     printVersion();
     polphone::app::Application application(std::move(options));
     const auto initialized = application.initialize();
     if (!initialized) {
         printError(initialized.error());
         return polphone::app::initializationExitCode(initialized.error().code);
+    }
+    if (interactive) {
+        polphone::app::ConsoleUi console(application, std::cin, std::cout, std::cerr);
+        return console.run();
     }
     return application.run();
 }

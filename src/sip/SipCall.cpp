@@ -321,6 +321,44 @@ bool SipCall::hasActiveAudio() const noexcept
     return audioConnected_.load();
 }
 
+util::Result<void> SipCall::setMuted(bool muted)
+{
+    if (!audioConnected_.load()) {
+        return util::Result<void>::failure(
+            util::ErrorCode::Runtime,
+            "O áudio da chamada ainda não está ativo.");
+    }
+    try {
+        std::optional<pj::AudioMedia> media;
+        {
+            std::lock_guard<std::mutex> lock(mediaMutex_);
+            media = audioMedia_;
+        }
+        if (!media.has_value()) {
+            return util::Result<void>::failure(
+                util::ErrorCode::Runtime,
+                "A mídia de áudio da chamada não está disponível.");
+        }
+        pj::AudioMedia& capture = pj::Endpoint::instance()
+            .audDevManager().getCaptureDevMedia();
+        if (muted) capture.stopTransmit(*media);
+        else capture.startTransmit(*media);
+        muted_ = muted;
+        static_cast<void>(events_.push(app::UiEvent{
+            app::UiEventSeverity::Info,
+            "media",
+            muted ? "Microfone silenciado." : "Microfone reativado."}));
+        return util::Result<void>::success();
+    } catch (const pj::Error& error) {
+        return util::Result<void>::failure(makePjError(error, "alterar mudo da chamada"));
+    }
+}
+
+bool SipCall::isMuted() const noexcept
+{
+    return muted_.load();
+}
+
 bool SipCall::canReap() const noexcept
 {
     return callbackDepth_.load() == 0U && externalUseDepth_.load() == 0U;
@@ -595,6 +633,7 @@ util::Result<void> SipCall::connectAudio(unsigned mediaIndex)
         receiveConnected = true;
         capture.startTransmit(callMedia);
         audioConnected_ = true;
+        muted_ = false;
 
         try {
             const pj::StreamInfo stream = getStreamInfo(mediaIndex);
@@ -676,6 +715,7 @@ void SipCall::disconnectAudio(bool retainMedia) noexcept
             }
         }
         audioConnected_ = false;
+        muted_ = false;
         if (!retainMedia) {
             std::lock_guard<std::mutex> lock(mediaMutex_);
             audioMedia_.reset();
@@ -683,6 +723,7 @@ void SipCall::disconnectAudio(bool retainMedia) noexcept
         }
     } catch (...) {
         audioConnected_ = false;
+        muted_ = false;
         if (!retainMedia) audioConfSlot_ = PJSUA_INVALID_ID;
     }
 }

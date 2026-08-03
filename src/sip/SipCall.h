@@ -71,6 +71,8 @@ public:
     [[nodiscard]] std::optional<pj::AudioMedia> audioMedia() const;
     [[nodiscard]] int audioConfSlot() const noexcept;
     [[nodiscard]] bool hasActiveAudio() const noexcept;
+    [[nodiscard]] util::Result<void> setMuted(bool muted);
+    [[nodiscard]] bool isMuted() const noexcept;
     [[nodiscard]] util::Result<DtmfInfoResponse> sendDtmfInfo(
         char digit,
         unsigned durationMs,
@@ -120,6 +122,7 @@ private:
     std::optional<pj::AudioMedia> audioMedia_;
     std::atomic<int> audioConfSlot_{PJSUA_INVALID_ID};
     std::atomic<bool> audioConnected_{false};
+    std::atomic<bool> muted_{false};
     mutable std::mutex infoMutex_;
     std::condition_variable infoCondition_;
     std::shared_ptr<PendingInfo> pendingInfo_;
