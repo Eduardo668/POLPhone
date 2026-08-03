@@ -56,52 +56,53 @@ rede não usa masquerade. O acesso durante o **build** é usado somente para obt
 repositório oficial do Asterisk, o pjproject empacotado pelo Asterisk e os sons oficiais. A imagem
 final não contém Git, compilador ou ferramentas de build.
 
-## 3. Inicializar
+## 3. Inicializar no WSL
 
-Pré-requisitos: Docker Desktop/Engine em execução e Docker Compose v2 ou superior.
-
-No PowerShell 5.1+:
-
-```powershell
-.\scripts\lab-init.ps1
-```
-
-O script cria `lab\asterisk\.env`, gera segredos criptograficamente aleatórios para `1001`, `1002`
-e `2001`, confirma que o arquivo está ignorado e não inicia nada. Um `.env` existente só é
-substituído com confirmação textual ou `-Force` explícito.
-
-Em Linux/WSL com Docker disponível apenas no shell Bash:
+O caminho oficial é Bash dentro do WSL, com Docker Engine/Desktop e Docker Compose v2 acessíveis
+diretamente nessa distribuição. A partir de qualquer diretório, invoque o script pelo caminho do
+checkout; ele descobre a raiz pela própria localização e executa os comandos a partir dela.
 
 ```bash
 ./scripts/lab-init.sh
 ```
 
-Para consultar os segredos localmente, abra o `.env` no próprio computador. A alternativa explícita
-é:
+O script cria `lab/asterisk/.env`, gera segredos criptograficamente aleatórios para `1001`, `1002` e
+`2001`, confirma que o arquivo está ignorado e não inicia containers. Um `.env` existente é
+preservado; para substituí-lo conscientemente:
 
-```powershell
-.\scripts\lab-init.ps1 -Force -ShowSecrets
+```bash
+./scripts/lab-init.sh --force
 ```
 
-Esse comando recria as credenciais; não grave sua saída em logs ou capturas.
+Para exibir localmente as credenciais recém-geradas, acrescente `--show-secrets`. Essa opção é
+explícita; não grave sua saída em logs ou capturas.
 
 ## 4. Construir e subir
 
-```powershell
-.\scripts\lab-up.ps1
+```bash
+./scripts/lab-up.sh --build
 ```
 
-O script executa `docker compose config`, constrói a imagem local, inicia o serviço e espera o
-healthcheck. Se houver falha, mostra `compose ps` e as últimas linhas do log.
+O script executa `docker compose config --quiet`, inicia os serviços e espera ambos os healthchecks.
+Sem opção de build, o Compose constrói somente se a imagem estiver ausente. Use `--build` para forçar
+ou `--no-build` para impedir qualquer construção; `--timeout 300` altera o limite de espera. Em caso
+de falha, o script mostra `compose ps`, as últimas linhas dos logs e retorna código diferente de zero.
+
+Em Docker nativo no WSL, o script compara `LAB_BIND_IP` e `LAB_ADVERTISED_IP` com o IPv4 de origem
+da rota padrão. Se o IP virtual mudou, a subida é bloqueada com uma mensagem clara. A atualização
+somente dos dois arquivos locais ignorados exige opção explícita:
+
+```bash
+./scripts/lab-up.sh --no-build --use-wsl-ip
+```
+
+Essa opção nunca utiliza `0.0.0.0` e não modifica configuração global do WSL, Windows ou firewall.
 
 Comandos equivalentes para diagnóstico manual:
 
-```powershell
-Set-Location .\lab\asterisk
-docker compose config --quiet
-docker compose build
-docker compose up -d
-docker compose ps
+```bash
+./scripts/lab-status.sh
+./scripts/lab-logs.sh --asterisk --tail 120 --no-follow
 ```
 
 O healthcheck confirma:
@@ -141,7 +142,7 @@ conforme versão, backend e firewall. Primeiro teste com `127.0.0.1`. Se houver 
    LAB_ADVERTISED_IP=<IP_LOCAL_WINDOWS>
    ```
 
-4. execute `lab-up.ps1 -AllowLanExposure` somente após revisar o bind;
+4. execute `./scripts/lab-up.sh --allow-lan-exposure` somente após revisar o bind;
 5. ajuste `idUri`, `registrarUri` e `domain` na configuração local do POLPhone.
 
 O script nunca troca automaticamente para `0.0.0.0`; esse valor é rejeitado. Não use uma interface
@@ -151,8 +152,8 @@ de VPN, uma VLAN corporativa ou o endereço do PABX real.
 
 Copie o exemplo sem segredos:
 
-```powershell
-Copy-Item .\config\polphone.config.lab.example.json .\config\polphone.config.lab.json
+```bash
+cp config/polphone.config.lab.example.json config/polphone.config.lab.json
 ```
 
 No arquivo local ignorado, substitua apenas `REPLACE_WITH_LAB_SIP_1001_SECRET` pelo valor local de
@@ -193,11 +194,11 @@ e transporte UDP. Não existe rota genérica; somente as extensões exatas acima
 
 ## 8. Roteiro de teste
 
-Mantenha `lab-logs.ps1 -DtmfOnly` aberto em outro terminal e preencha
+Mantenha `./scripts/lab-logs.sh --dtmf` aberto em outro terminal e preencha
 [`LAB-DTMF-MATRIX.md`](LAB-DTMF-MATRIX.md).
 
-1. Rode `lab-init.ps1` e `lab-up.ps1`.
-2. Confirme `healthy` com `lab-status.ps1`.
+1. Rode `./scripts/lab-init.sh` e `./scripts/lab-up.sh --build`.
+2. Confirme `healthy` com `./scripts/lab-status.sh`.
 3. Inicie o POLPhone com a configuração local de laboratório.
 4. Execute `status` e confirme o registro fictício `1001`.
 5. Execute `call 600`, fale e confirme o eco; depois `hangup`.
@@ -224,7 +225,7 @@ Mantenha `lab-logs.ps1 -DtmfOnly` aberto em outro terminal e preencha
 11. Confirme exatamente um dígito; encerre.
 12. Repita os três testes com `--duration 250 --gap 150`.
 13. Verifique que cada requisição produz exatamente um dígito no coletor.
-14. Use `quit` no POLPhone e `lab-down.ps1` no laboratório.
+14. Use `quit` no POLPhone e `./scripts/lab-down.sh` no laboratório.
 
 Uma linha `POLPHONE_LAB_DTMF` com `readstatus=OK` e o dígito esperado é evidência de recepção pelo
 Asterisk. O retorno falado é evidência adicional. Inicialização, healthcheck, SIP `200 OK` isolado ou
@@ -232,9 +233,9 @@ presença de pacote RTP não comprovam entrega DTMF por si só.
 
 ## 9. CLI e debug manual
 
-Dentro de `lab\asterisk`:
+Dentro de `lab/asterisk`:
 
-```powershell
+```bash
 docker compose exec asterisk asterisk -rx "core show version"
 docker compose exec asterisk asterisk -rx "module show like chan_sip"
 docker compose exec asterisk asterisk -rx "module show like chan_pjsip"
@@ -248,7 +249,7 @@ docker compose exec asterisk asterisk -rx "sip set debug on"
 
 Ative os dois últimos somente durante uma investigação curta. Desative depois:
 
-```powershell
+```bash
 docker compose exec asterisk asterisk -rx "rtp set debug off"
 docker compose exec asterisk asterisk -rx "sip set debug off"
 ```
@@ -259,26 +260,41 @@ Não versione logs ou capturas. O laboratório não exige `.pcap` para sua valid
 
 Parar preservando `.env`:
 
-```powershell
-.\scripts\lab-down.ps1
+```bash
+./scripts/lab-down.sh
 ```
 
 Remover também volumes transitórios:
 
-```powershell
-.\scripts\lab-down.ps1 -RemoveVolumes
+```bash
+./scripts/lab-down.sh --volumes
 ```
 
 Reset completo com confirmação explícita:
 
-```powershell
-.\scripts\lab-reset.ps1
+```bash
+./scripts/lab-reset.sh
 ```
 
-O reset preserva `.env` por padrão. `-RemoveEnv` solicita uma segunda confirmação antes de apagar os
-segredos locais.
+O reset exige `RESETAR-LAB`, executa `down --volumes`, remove somente dados transitórios dentro do
+laboratório e preserva `.env`. Use `--yes` para automação explícita e `--regenerate-env` para gerar
+novas credenciais sem exibi-las. Imagens só são removidas quando
+`./scripts/lab-down.sh --remove-images` é solicitado.
 
-## 11. Validação automatizada
+## 11. PowerShell opcional
+
+Os arquivos `scripts/lab-*.ps1` são wrappers finos. Eles localizam `wsl.exe`, convertem o caminho do
+checkout e repassam argumentos e exit code ao script Bash correspondente; não implementam Docker
+separadamente. Exemplo opcional no Windows:
+
+```powershell
+.\scripts\lab-up.ps1 --build --timeout 300
+```
+
+Se WSL não estiver disponível, o wrapper encerra com mensagem clara. Docker no PATH do Windows não é
+necessário.
+
+## 12. Validação automatizada
 
 Em Bash/WSL:
 

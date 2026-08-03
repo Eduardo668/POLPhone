@@ -39,6 +39,32 @@ bool startsWithSipScheme(std::string_view value) noexcept
             || (value.size() >= 5U && equalAscii(value[3], 's') && value[4] == ':'));
 }
 
+std::string registrarTarget(std::string_view registrarUri)
+{
+    const std::string normalized = util::trim(registrarUri);
+    if (!startsWithSipScheme(normalized)) return {};
+
+    const bool secure = normalized.size() >= 5U
+        && static_cast<char>(std::tolower(
+               static_cast<unsigned char>(normalized[3]))) == 's';
+    const std::size_t schemeLength = secure ? 5U : 4U;
+    const std::size_t authorityEnd = normalized.find_first_of(";?", schemeLength);
+    std::string authority = normalized.substr(
+        schemeLength,
+        authorityEnd == std::string::npos
+            ? std::string::npos
+            : authorityEnd - schemeLength);
+    const std::size_t userInfoEnd = authority.rfind('@');
+    if (userInfoEnd != std::string::npos) authority.erase(0U, userInfoEnd + 1U);
+    if (authority.empty()
+        || std::any_of(authority.cbegin(), authority.cend(), [](char value) {
+               return std::isspace(static_cast<unsigned char>(value)) != 0;
+           })) {
+        return {};
+    }
+    return std::string(secure ? "sips:" : "sip:") + authority;
+}
+
 std::string callStateText(app::CallState state)
 {
     switch (state) {
@@ -59,7 +85,8 @@ std::atomic<std::size_t> SipCall::liveCount_{0U};
 
 util::Result<std::string> normalizeDestination(
     std::string_view destination,
-    std::string_view domain)
+    std::string_view domain,
+    std::string_view registrarUri)
 {
     const std::string normalized = util::trim(destination);
     if (normalized.empty()) {
@@ -82,8 +109,14 @@ util::Result<std::string> normalizeDestination(
             util::ErrorCode::Validation,
             "O domínio SIP está vazio; configure sip.domain antes de discar.");
     }
-    return util::Result<std::string>::success(
-        "sip:" + normalized + "@" + normalizedDomain);
+    const std::string registrar = registrarTarget(registrarUri);
+    if (!registrar.empty()) {
+        const std::size_t schemeEnd = registrar.find(':');
+        return util::Result<std::string>::success(
+            registrar.substr(0U, schemeEnd + 1U) + normalized + "@"
+            + registrar.substr(schemeEnd + 1U));
+    }
+    return util::Result<std::string>::success("sip:" + normalized + "@" + normalizedDomain);
 }
 
 app::CallState callStateFromPjsip(pjsip_inv_state state) noexcept

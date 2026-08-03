@@ -24,6 +24,25 @@ for required_file in \
     check_file "$required_file"
 done
 
+for operation_script in \
+    lab-common.sh lab-init.sh lab-up.sh lab-status.sh lab-logs.sh lab-down.sh lab-reset.sh; do
+    [ -f "$repo_dir/scripts/$operation_script" ] || fail "script Bash obrigatório ausente: scripts/$operation_script"
+    grep -F 'set -Eeuo pipefail' "$repo_dir/scripts/$operation_script" >/dev/null || \
+        fail "script Bash sem modo estrito: scripts/$operation_script"
+done
+
+grep -F 'BASH_SOURCE[0]' "$repo_dir/scripts/lab-common.sh" >/dev/null || fail "lab-common.sh não descobre a raiz pela própria localização"
+grep -F 'docker compose' "$repo_dir/scripts/lab-common.sh" >/dev/null || fail "comando Compose não está centralizado"
+grep -F -- '--env-file' "$repo_dir/scripts/lab-common.sh" >/dev/null || fail "scripts Bash não usam --env-file explícito"
+grep -F 'ip -4 route get 1.1.1.1' "$repo_dir/scripts/lab-common.sh" >/dev/null || fail "detecção do IP atual do WSL ausente"
+grep -F -- '--use-wsl-ip' "$repo_dir/scripts/lab-up.sh" >/dev/null || fail "opção explícita --use-wsl-ip ausente"
+grep -F 'lab-up.sh --build' "$repo_dir/README.md" >/dev/null || fail "README principal não documenta Bash-first"
+
+for wrapper in lab-init.ps1 lab-up.ps1 lab-status.ps1 lab-logs.ps1 lab-down.ps1 lab-reset.ps1; do
+    grep -F 'Invoke-POLPhoneLabWsl' "$repo_dir/scripts/$wrapper" >/dev/null || \
+        fail "wrapper PowerShell não encaminha ao WSL: scripts/$wrapper"
+done
+
 command -v docker >/dev/null 2>&1 || fail "Docker não encontrado"
 docker compose version >/dev/null 2>&1 || fail "Docker Compose não encontrado"
 
@@ -94,5 +113,10 @@ grep -F 'module show like chan_sip.so' "$lab_dir/scripts/healthcheck.sh" >/dev/n
 grep -F 'dialplan show 9999@from-lab' "$lab_dir/scripts/healthcheck.sh" >/dev/null || fail "healthcheck não valida dialplan"
 grep -F 'sip show settings' "$lab_dir/scripts/healthcheck.sh" >/dev/null || fail "healthcheck não valida UDP"
 grep -F 'gateway.sh /proc/1/cmdline' "$lab_dir/docker-compose.yml" >/dev/null || fail "healthcheck do relay ausente"
+grep -F 'start_sip_relay 5060 5060' "$lab_dir/scripts/gateway.sh" >/dev/null || fail "relay SIP chan_sip ausente"
+grep -F 'start_sip_relay 5061 5061' "$lab_dir/scripts/gateway.sh" >/dev/null || fail "relay SIP PJSIP ausente"
+grep -F 'UDP4-LISTEN:${listen_port},reuseaddr,fork' "$lab_dir/scripts/gateway.sh" >/dev/null || fail "relay RTP não mantém associação UDP por cliente"
+grep -F 'UDP4:asterisk:${target_port}' "$lab_dir/scripts/gateway.sh" >/dev/null || fail "relay RTP não usa destino UDP conectado"
+grep -F 'start_rtp_relay "$relay_port" "$relay_port"' "$lab_dir/scripts/gateway.sh" >/dev/null || fail "faixa RTP não usa relay com origem estável"
 
 echo "[OK] validações estáticas e docker compose config concluídas"

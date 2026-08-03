@@ -40,7 +40,8 @@ struct DtmfInfoResponse {
 
 [[nodiscard]] util::Result<std::string> normalizeDestination(
     std::string_view destination,
-    std::string_view domain);
+    std::string_view domain,
+    std::string_view registrarUri = {});
 [[nodiscard]] app::CallState callStateFromPjsip(pjsip_inv_state state) noexcept;
 [[nodiscard]] std::string_view callMediaStatusName(
     pjsua_call_media_status status) noexcept;

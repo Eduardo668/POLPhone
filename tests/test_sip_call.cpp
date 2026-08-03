@@ -40,6 +40,26 @@ TEST_SUITE("call") {
         CHECK_FALSE(polphone::sip::normalizeDestination("1002 1003", "pbx.local"));
     }
 
+    TEST_CASE("preserva a porta nao padrao do registrar em destinos curtos")
+    {
+        const auto extension = polphone::sip::normalizeDestination(
+            "600", "pbx.local", "sip:192.0.2.10:15060");
+        REQUIRE(extension);
+        CHECK(extension.value() == "sip:600@192.0.2.10:15060");
+
+        const auto registrarWithParameters = polphone::sip::normalizeDestination(
+            "9991", "pbx.local", "sip:lab.invalid:16060;transport=udp");
+        REQUIRE(registrarWithParameters);
+        CHECK(registrarWithParameters.value() == "sip:9991@lab.invalid:16060");
+
+        const auto complete = polphone::sip::normalizeDestination(
+            "sip:600@other.invalid:17060",
+            "pbx.local",
+            "sip:lab.invalid:16060");
+        REQUIRE(complete);
+        CHECK(complete.value() == "sip:600@other.invalid:17060");
+    }
+
     TEST_CASE("mapeia estados PJSIP")
     {
         CHECK(polphone::sip::callStateFromPjsip(PJSIP_INV_STATE_CALLING)

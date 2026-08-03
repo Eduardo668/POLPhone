@@ -279,7 +279,8 @@ util::Result<void> Application::makeCall(std::string_view destination)
             util::ErrorCode::Runtime,
             "A conta SIP não está pronta; inicialize a aplicação antes de ligar.");
     }
-    const auto normalized = sip::normalizeDestination(destination, config_->sip.domain);
+    const auto normalized = sip::normalizeDestination(
+        destination, config_->sip.domain, config_->sip.registrarUri);
     if (!normalized) return util::Result<void>::failure(normalized.error());
 
     std::unique_ptr<sip::SipCall> call;

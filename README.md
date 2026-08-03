@@ -183,7 +183,18 @@ Na documentação versionada, use somente aliases de destino e resultados saniti
 O laboratório opcional em `lab/asterisk/` constrói localmente um Asterisk 20.19.0 isolado, sem
 troncos ou rotas externas, para testar registro fictício, eco de áudio e os três métodos DTMF antes
 de qualquer ensaio autorizado em infraestrutura real. Ele não participa do build normal do
-POLPhone. Veja [`docs/LAB-ASTERISK-GUIDE.md`](docs/LAB-ASTERISK-GUIDE.md).
+POLPhone. A operação oficial é Bash/WSL:
+
+```bash
+./scripts/lab-init.sh
+./scripts/lab-up.sh --build
+./scripts/lab-status.sh
+./scripts/lab-logs.sh --dtmf
+./scripts/lab-down.sh --volumes
+```
+
+Os scripts PowerShell são somente wrappers opcionais para WSL. Veja
+[`docs/LAB-ASTERISK-GUIDE.md`](docs/LAB-ASTERISK-GUIDE.md).
 
 ## Documentação
 

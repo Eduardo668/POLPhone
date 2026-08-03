@@ -8,32 +8,39 @@ O build usa exclusivamente o repositório oficial `asterisk/asterisk`, tag `20.1
 `f66917fe6da487155f80ab50403bf3d7bdc86183`. A imagem é construída localmente; nenhum script faz
 push ou publica a imagem.
 
-## Início rápido
+## Início rápido no WSL
 
-No PowerShell 5.1 ou superior, a partir da raiz do POLPhone:
+O Bash no WSL é a interface oficial. A partir da raiz do POLPhone:
 
-```powershell
-.\scripts\lab-init.ps1
-.\scripts\lab-up.ps1
-.\scripts\lab-status.ps1
+```bash
+./scripts/lab-init.sh
+./scripts/lab-up.sh --build
+./scripts/lab-status.sh
 ```
 
-O `lab-init.ps1` gera segredos fortes em `.env`, arquivo ignorado pelo Git. Ele não inicia o
-container e não exibe os segredos, a menos que `-ShowSecrets` seja informado explicitamente.
-Em um host Linux/WSL sem Docker disponível no PATH do Windows PowerShell, use
-`./scripts/lab-init.sh` a partir da raiz do repositório.
+O `lab-init.sh` gera segredos fortes em `.env`, arquivo ignorado pelo Git. Ele não inicia containers
+nem exibe credenciais. Nas próximas execuções, `lab-up.sh` pode ser usado sem `--build`; a imagem só
+será construída se estiver ausente. Os scripts descobrem a raiz do projeto pela própria localização
+e não dependem de `powershell.exe` nem do Docker no PATH do Windows.
+
+Se o Docker for nativo do WSL e o IP virtual mudar, `lab-up.sh` bloqueia a subida. Use
+`./scripts/lab-up.sh --no-build --use-wsl-ip` para atualizar explicitamente somente o `.env` e a
+configuração local ignorada do POLPhone; nunca há fallback para `0.0.0.0`.
 
 Para acompanhar somente resultados do coletor:
 
-```powershell
-.\scripts\lab-logs.ps1 -DtmfOnly
+```bash
+./scripts/lab-logs.sh --dtmf
 ```
 
 Para encerrar sem apagar a configuração local:
 
-```powershell
-.\scripts\lab-down.ps1
+```bash
+./scripts/lab-down.sh
 ```
+
+Os `.ps1` permanecem como wrappers opcionais que chamam esses mesmos scripts via `wsl.exe`,
+preservando argumentos e exit code; não há uma segunda implementação operacional.
 
 O roteiro completo, limitações de NAT e critérios de evidência estão em
 [`../../docs/LAB-ASTERISK-GUIDE.md`](../../docs/LAB-ASTERISK-GUIDE.md).

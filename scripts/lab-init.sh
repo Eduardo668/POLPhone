@@ -1,56 +1,78 @@
-#!/bin/sh
-set -eu
+#!/usr/bin/env bash
+set -Eeuo pipefail
 
-repo_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-lab_dir="$repo_dir/lab/asterisk"
-env_file="$lab_dir/.env"
-example_file="$lab_dir/.env.example"
-force=no
-show_secrets=no
+source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)/lab-common.sh"
 
-for argument in "$@"; do
-    case "$argument" in
-        --force) force=yes ;;
-        --show-secrets) show_secrets=yes ;;
-        *) echo "Uso: $0 [--force] [--show-secrets]" >&2; exit 2 ;;
-    esac
-done
+force=0
+show_secrets=0
+temp_file=''
 
-command -v docker >/dev/null 2>&1 || { echo "Docker não encontrado." >&2; exit 1; }
-docker version >/dev/null 2>&1 || { echo "Daemon Docker não acessível." >&2; exit 1; }
-docker compose version >/dev/null 2>&1 || { echo "Docker Compose v2+ não encontrado." >&2; exit 1; }
-command -v openssl >/dev/null 2>&1 || { echo "OpenSSL é necessário para gerar segredos." >&2; exit 1; }
+usage() {
+    cat <<'EOF'
+Uso: ./scripts/lab-init.sh [--force] [--show-secrets]
 
-if [ -f "$env_file" ] && [ "$force" != yes ]; then
-    printf 'O .env já existe. Digite SOBRESCREVER para recriá-lo: '
-    IFS= read -r confirmation
-    if [ "$confirmation" != SOBRESCREVER ]; then
-        echo "Configuração preservada; nenhuma alteração realizada."
-        exit 0
-    fi
-fi
-
-secret1001=$(openssl rand -hex 32)
-secret1002=$(openssl rand -hex 32)
-secret2001=$(openssl rand -hex 32)
-sed \
-    -e "s|LAB_SIP_1001_SECRET=GENERATE_WITH_LAB_INIT|LAB_SIP_1001_SECRET=$secret1001|" \
-    -e "s|LAB_SIP_1002_SECRET=GENERATE_WITH_LAB_INIT|LAB_SIP_1002_SECRET=$secret1002|" \
-    -e "s|LAB_PJSIP_2001_SECRET=GENERATE_WITH_LAB_INIT|LAB_PJSIP_2001_SECRET=$secret2001|" \
-    "$example_file" > "$env_file"
-chmod 0600 "$env_file"
-
-git -C "$repo_dir" check-ignore -q lab/asterisk/.env || {
-    echo "Proteção Git inválida: lab/asterisk/.env não está ignorado." >&2
-    exit 1
+  --force         substitui um .env existente sem confirmação
+  --show-secrets  exibe as novas credenciais somente no terminal local
+EOF
 }
 
-echo "Laboratório inicializado sem iniciar containers."
-echo "Ramais fictícios: 1001, 1002 e endpoint PJSIP opcional 2001."
-echo "Segredos gravados somente em lab/asterisk/.env."
-if [ "$show_secrets" = yes ]; then
-    echo "AVISO: exibição local solicitada explicitamente; não registre estes valores."
-    echo "1001: $secret1001"
-    echo "1002: $secret1002"
-    echo "2001: $secret2001"
+while (($#)); do
+    case "$1" in
+        --force) force=1 ;;
+        --show-secrets) show_secrets=1 ;;
+        --help|-h) usage; exit 0 ;;
+        *) lab_usage_error "Opção desconhecida: $1." ;;
+    esac
+    shift
+done
+
+lab_validate_docker
+command -v git >/dev/null 2>&1 || lab_die "Git não foi encontrado; não é possível confirmar a proteção do .env."
+[[ -f "${LAB_ENV_EXAMPLE}" ]] || lab_die "Template ausente: lab/asterisk/.env.example."
+
+if [[ -f "${LAB_ENV_FILE}" && ${force} -ne 1 ]]; then
+    lab_die "lab/asterisk/.env já existe. Use --force somente se deseja gerar novas credenciais."
+fi
+
+if ! git -C "${LAB_REPO_ROOT}" check-ignore --quiet lab/asterisk/.env; then
+    lab_die "Proteção Git inválida: lab/asterisk/.env não está ignorado."
+fi
+
+generate_secret() {
+    if command -v openssl >/dev/null 2>&1; then
+        openssl rand -hex 32
+        return
+    fi
+    [[ -r /dev/urandom ]] || lab_die "Nem openssl nem /dev/urandom estão disponíveis para gerar credenciais."
+    command -v od >/dev/null 2>&1 && command -v tr >/dev/null 2>&1 || \
+        lab_die "O fallback seguro requer od e tr."
+    od -An -N32 -tx1 /dev/urandom | tr -d ' \n'
+}
+
+secret1001="$(generate_secret)"
+secret1002="$(generate_secret)"
+secret2001="$(generate_secret)"
+
+umask 077
+temp_file="$(mktemp "${LAB_DIR}/.env.tmp.XXXXXX")"
+cleanup() {
+    [[ -z "${temp_file}" || ! -e "${temp_file}" ]] || rm -f -- "${temp_file}"
+}
+trap cleanup EXIT
+
+sed \
+    -e "s|LAB_SIP_1001_SECRET=GENERATE_WITH_LAB_INIT|LAB_SIP_1001_SECRET=${secret1001}|" \
+    -e "s|LAB_SIP_1002_SECRET=GENERATE_WITH_LAB_INIT|LAB_SIP_1002_SECRET=${secret1002}|" \
+    -e "s|LAB_PJSIP_2001_SECRET=GENERATE_WITH_LAB_INIT|LAB_PJSIP_2001_SECRET=${secret2001}|" \
+    "${LAB_ENV_EXAMPLE}" > "${temp_file}"
+chmod 0600 "${temp_file}"
+mv -f -- "${temp_file}" "${LAB_ENV_FILE}"
+temp_file=''
+
+lab_info "Laboratório inicializado sem iniciar containers."
+lab_info "Ramais fictícios: 1001, 1002 e endpoint PJSIP opcional 2001."
+lab_info "Credenciais gravadas somente em lab/asterisk/.env."
+if (( show_secrets == 1 )); then
+    lab_warn "Exibição local solicitada explicitamente; não copie estes valores para logs ou commits."
+    printf '1001: %s\n1002: %s\n2001: %s\n' "${secret1001}" "${secret1002}" "${secret2001}"
 fi
