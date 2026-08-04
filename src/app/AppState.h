@@ -33,8 +33,15 @@ enum class CallState {
     Disconnected
 };
 
+enum class CallDirection {
+    None,
+    Incoming,
+    Outgoing
+};
+
 [[nodiscard]] std::string_view registrationStateName(RegistrationState state) noexcept;
 [[nodiscard]] std::string_view callStateName(CallState state) noexcept;
+[[nodiscard]] std::string_view callDirectionName(CallDirection direction) noexcept;
 
 struct RegistrationSnapshot {
     RegistrationState state{RegistrationState::Unconfigured};
@@ -47,6 +54,7 @@ struct RegistrationSnapshot {
 
 struct CallSnapshot {
     CallState state{CallState::Idle};
+    CallDirection direction{CallDirection::None};
     int sipCode{0};
     std::string reason;
     std::string remoteUri;

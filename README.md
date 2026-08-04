@@ -183,10 +183,42 @@ controles normais.
 
 Sem `--demo`, a GUI usa `config\polphone.config.json` ou o caminho informado por `--config`. As
 alterações da tela de configurações passam pelo `ConfigValidator`, são escritas via arquivo temporário
-e exigem reinício do aplicativo para recriar o motor SIP. A senha permanece mascarada e não entra em
-logs nem no diagnóstico.
+e a configuração DTMF é aplicada ao motor em runtime; não é necessário editar o JSON nem reiniciar.
+Para executar a GUI a partir de uma árvore UNC/WSL, use `scripts\run-gui.ps1 -Config Release`, que
+sincroniza automaticamente o arquivo de execução com `config\polphone.config.json`. Alterações de
+conta SIP que dependam de recriar a conta continuam exigindo reconexão. A senha permanece mascarada
+e não entra em logs nem no diagnóstico.
 
-A identidade visual está centralizada em `gui/Theme.h`; a cor principal é exatamente `#0a3b68`.
+### Passo a passo para abrir o POLPhone
+
+No PowerShell, a partir da raiz do repositório:
+
+1. Confirme que o arquivo local existe em `config\polphone.config.json`.
+2. Se a GUI ainda não foi compilada nesta configuração, compile-a:
+
+   ```powershell
+   .\scripts\build-gui.ps1 -Config Release
+   ```
+
+3. Abra a GUI usando o launcher oficial:
+
+   ```powershell
+   powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./scripts/run-gui.ps1 -Config Release
+   ```
+
+   No Windows, também é possível executar `scripts\run-gui.cmd -Config Release`.
+
+4. Na janela do POLPhone, use **Configurações**, altere os campos e clique em **Salvar**.
+   As alterações DTMF são aplicadas imediatamente e o launcher sincroniza o JSON local.
+5. Para testar o DTMF, registre a conta, faça uma chamada e envie dígitos pelo teclado da GUI.
+   Use **Diagnóstico** para conferir o método configurado, o método efetivo e o resultado do último
+   envio.
+6. Para encerrar, feche a janela normalmente. Não edite o JSON enquanto o POLPhone estiver aberto.
+
+O comando `run-demo.ps1` abre somente o modo de demonstração, sem rede SIP; ele não deve ser usado
+para testar registro, áudio ou DTMF contra o Issabel.
+
+A identidade visual está centralizada em `gui/Theme.h`; a cor principal é exatamente `#0A6087`.
 Detalhes da separação de processos, threads e ciclo de vida estão em
 [`docs/GUI-ARCHITECTURE.md`](docs/GUI-ARCHITECTURE.md).
 

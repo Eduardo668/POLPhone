@@ -45,6 +45,16 @@ TEST_SUITE("config") {
         CHECK(ConfigValidator::validate(validConfig()));
     }
 
+    TEST_CASE("nome de exibição e usuário Digest permanecem independentes")
+    {
+        auto config = validConfig();
+        config.sip.displayName = "João Operador";
+        config.sip.authUsername = "auth-1309";
+        CHECK(ConfigValidator::validate(config));
+        config.sip.authUsername = "auth 1309";
+        checkInvalid(config, "sip.authUsername");
+    }
+
     TEST_CASE("URIs SIP e campos obrigatórios são validados")
     {
         auto config = validConfig();

@@ -32,6 +32,8 @@ class CallRegistry;
     int sipCode,
     pj_status_t transportStatus,
     std::string_view reason);
+[[nodiscard]] std::string authenticationUsername(const config::SipConfig& config);
+[[nodiscard]] std::string accountIdentityUri(const config::SipConfig& config);
 
 class SipAccount final : public pj::Account {
 public:

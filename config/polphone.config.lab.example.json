@@ -2,9 +2,11 @@
   "$schema": "./polphone.config.schema.json",
   "sip": {
     "idUri": "sip:1001@127.0.0.1",
+    "displayName": "POLPhone Lab",
     "registrarUri": "sip:127.0.0.1:15060",
     "realm": "*",
     "username": "1001",
+    "authUsername": "1001",
     "password": "REPLACE_WITH_LAB_SIP_1001_SECRET",
     "domain": "127.0.0.1",
     "proxyUri": "",
@@ -51,5 +53,9 @@
     "directory": "logs/lab",
     "maxFileMB": 50,
     "sipMessageTrace": true
+  },
+  "behavior": {
+    "ringtoneEnabled": true,
+    "topmostOnIncomingCall": false
   }
 }

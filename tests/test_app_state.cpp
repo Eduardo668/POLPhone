@@ -52,11 +52,13 @@ TEST_SUITE("registration") {
         polphone::app::AppState state;
         state.updateCall({
             polphone::app::CallState::Confirmed,
+            polphone::app::CallDirection::Incoming,
             200,
             "OK",
             "sip:1002@pbx.local"});
         auto snapshot = state.call();
         CHECK(snapshot.state == polphone::app::CallState::Confirmed);
+        CHECK(snapshot.direction == polphone::app::CallDirection::Incoming);
         CHECK(snapshot.sipCode == 200);
         CHECK(snapshot.remoteUri == "sip:1002@pbx.local");
         snapshot.remoteUri.clear();
@@ -78,5 +80,20 @@ TEST_SUITE("registration") {
               .find("indisponível") != std::string::npos);
         CHECK(polphone::sip::registrationStatusMessage(0, PJ_ETIMEDOUT, "")
               .find("Sem resposta") != std::string::npos);
+    }
+
+
+    TEST_CASE("display name nunca substitui usuário de autenticação Digest")
+    {
+        polphone::config::SipConfig config;
+        config.idUri = "sip:1309@pbx.invalid";
+        config.username = "1309";
+        config.authUsername = "digest-1309";
+        config.displayName = "João Silva";
+        CHECK(polphone::sip::authenticationUsername(config) == "digest-1309");
+        CHECK(polphone::sip::accountIdentityUri(config)
+              == "\"João Silva\" <sip:1309@pbx.invalid>");
+        config.authUsername.clear();
+        CHECK(polphone::sip::authenticationUsername(config) == "1309");
     }
 }

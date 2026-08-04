@@ -15,6 +15,36 @@
 
 namespace polphone::sip {
 
+CallRegistry::Lease::Lease(SipCall* call) noexcept : call_(call) {}
+
+CallRegistry::Lease::~Lease() { reset(); }
+
+CallRegistry::Lease::Lease(Lease&& other) noexcept
+    : call_(std::exchange(other.call_, nullptr))
+{
+}
+
+CallRegistry::Lease& CallRegistry::Lease::operator=(Lease&& other) noexcept
+{
+    if (this != &other) {
+        reset();
+        call_ = std::exchange(other.call_, nullptr);
+    }
+    return *this;
+}
+
+SipCall* CallRegistry::Lease::get() const noexcept { return call_; }
+SipCall* CallRegistry::Lease::operator->() const noexcept { return call_; }
+CallRegistry::Lease::operator bool() const noexcept { return call_ != nullptr; }
+
+void CallRegistry::Lease::reset() noexcept
+{
+    if (call_ != nullptr) {
+        call_->releaseExternalUse();
+        call_ = nullptr;
+    }
+}
+
 CallRegistry::~CallRegistry() = default;
 
 util::Result<void> CallRegistry::adopt(std::unique_ptr<SipCall>& call)
@@ -34,13 +64,15 @@ util::Result<void> CallRegistry::adopt(std::unique_ptr<SipCall>& call)
     return util::Result<void>::success();
 }
 
-SipCall* CallRegistry::current() const noexcept
+CallRegistry::Lease CallRegistry::acquireCurrent() const noexcept
 {
     try {
         std::lock_guard<std::mutex> lock(mutex_);
-        return current_.get();
+        if (current_ == nullptr) return Lease{};
+        current_->retainExternalUse();
+        return Lease{current_.get()};
     } catch (...) {
-        return nullptr;
+        return Lease{};
     }
 }
 
@@ -65,6 +97,20 @@ void CallRegistry::retire(SipCall* call) noexcept
         condition_.notify_all();
     } catch (...) {
         // Se a alocação do graveyard falhar, mantém a chamada corrente viva.
+    }
+}
+
+void CallRegistry::retireCurrent() noexcept
+{
+    try {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (current_ == nullptr) return;
+            graveyard_.push_back(std::move(current_));
+        }
+        condition_.notify_all();
+    } catch (...) {
+        // Preserva current_ se o graveyard não puder crescer.
     }
 }
 

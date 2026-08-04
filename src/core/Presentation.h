@@ -11,9 +11,29 @@
 
 namespace polphone::core {
 
+struct CallerIdentity {
+    std::string displayName;
+    std::string number;
+    std::string sanitizedUri;
+};
+
+struct PhoneEvent {
+    PhoneEventType type{PhoneEventType::CallDisconnected};
+    CallDirection direction{CallDirection::None};
+    std::string remoteDisplayName;
+    std::string remoteNumber;
+    std::string remoteUri;
+    bool muted{false};
+};
+
 [[nodiscard]] POLPHONE_CORE_API util::Result<std::string> validateDestination(std::string_view value);
 [[nodiscard]] POLPHONE_CORE_API std::string maskDestination(std::string_view value);
 [[nodiscard]] POLPHONE_CORE_API std::string formatCallDuration(std::uint64_t seconds);
+[[nodiscard]] POLPHONE_CORE_API CallerIdentity parseCallerIdentity(std::string_view value);
+// Retorna true somente quando o evento provocou uma transição observável.
+[[nodiscard]] POLPHONE_CORE_API bool applyPhoneEvent(
+    TelephonySnapshot& snapshot,
+    const PhoneEvent& event);
 [[nodiscard]] POLPHONE_CORE_API CommandAvailability commandAvailability(
     const TelephonySnapshot& snapshot,
     bool callCommandPending = false,

@@ -90,6 +90,13 @@ util::Result<void> ConfigValidator::validate(const AppConfig& config)
     }
     if (const auto result = requireNotEmpty(config.sip.realm, "sip.realm", "informe o realm ou use *"); !result) return result;
     if (const auto result = requireNotEmpty(config.sip.username, "sip.username", "informe o usuário SIP"); !result) return result;
+    if (containsWhitespace(config.sip.authUsername)) {
+        return invalid("sip.authUsername", "não use espaços no usuário de autenticação");
+    }
+    if (config.sip.displayName.find('\r') != std::string::npos
+        || config.sip.displayName.find('\n') != std::string::npos) {
+        return invalid("sip.displayName", "não use quebras de linha no nome de exibição");
+    }
     if (const auto result = requireNotEmpty(config.sip.password, "sip.password", "informe a senha SIP"); !result) return result;
     if (const auto result = requireNotEmpty(config.sip.domain, "sip.domain", "informe o domínio SIP"); !result) return result;
     if (config.sip.regTimeoutSec <= 0) return invalid("sip.regTimeoutSec", "use um valor maior que zero");

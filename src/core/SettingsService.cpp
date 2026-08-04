@@ -23,7 +23,8 @@ nlohmann::json serialize(const config::AppConfig& value)
     return {
         {"sip", {
             {"idUri", value.sip.idUri}, {"registrarUri", value.sip.registrarUri},
-            {"realm", value.sip.realm}, {"username", value.sip.username},
+            {"displayName", value.sip.displayName}, {"realm", value.sip.realm},
+            {"username", value.sip.username}, {"authUsername", value.sip.authUsername},
             {"password", value.sip.password}, {"domain", value.sip.domain},
             {"proxyUri", value.sip.proxyUri}, {"regTimeoutSec", value.sip.regTimeoutSec},
             {"regRetryIntervalSec", value.sip.regRetryIntervalSec},
@@ -45,7 +46,10 @@ nlohmann::json serialize(const config::AppConfig& value)
         {"logging", {
             {"consoleLevel", value.logging.consoleLevel}, {"fileLevel", value.logging.fileLevel},
             {"directory", value.logging.directory}, {"maxFileMB", value.logging.maxFileMB},
-            {"sipMessageTrace", value.logging.sipMessageTrace}}}
+            {"sipMessageTrace", value.logging.sipMessageTrace}}},
+        {"behavior", {
+            {"ringtoneEnabled", value.behavior.ringtoneEnabled},
+            {"topmostOnIncomingCall", value.behavior.topmostOnIncomingCall}}}
     };
 }
 
@@ -77,6 +81,32 @@ util::Result<void> replaceFile(const std::filesystem::path& temporary,
 
 } // namespace
 
+util::Result<GuiSettings> loadGuiSettings(const std::filesystem::path& path)
+{
+    auto loaded = config::ConfigLoader::load(path);
+    if (!loaded) return util::Result<GuiSettings>::failure(loaded.error());
+    const auto& value = loaded.value();
+    GuiSettings settings;
+    settings.serverSip = value.sip.proxyUri;
+    settings.registrarUri = value.sip.registrarUri;
+    settings.idUri = value.sip.idUri;
+    settings.displayName = value.sip.displayName;
+    settings.username = value.sip.username;
+    settings.authUsername = value.sip.authUsername;
+    settings.domain = value.sip.domain;
+    settings.registerOnStartup = value.sip.registerOnStartup;
+    settings.captureDevice = value.audio.captureDevice;
+    settings.playbackDevice = value.audio.playbackDevice;
+    settings.dtmfMethod = value.dtmf.defaultMethod;
+    settings.dtmfDurationMs = value.dtmf.durationMs;
+    settings.dtmfGapMs = value.dtmf.gapMs;
+    settings.inbandVolumeDbm0 = value.dtmf.volumeDbm0;
+    settings.logLevel = value.logging.consoleLevel;
+    settings.ringtoneEnabled = value.behavior.ringtoneEnabled;
+    settings.topmostOnIncomingCall = value.behavior.topmostOnIncomingCall;
+    return util::Result<GuiSettings>::success(std::move(settings));
+}
+
 util::Result<void> saveGuiSettings(const std::filesystem::path& path,
                                    const GuiSettings& settings)
 {
@@ -91,8 +121,10 @@ util::Result<void> saveGuiSettings(const std::filesystem::path& path,
     config.sip.proxyUri = settings.serverSip;
     config.sip.registrarUri = settings.registrarUri;
     config.sip.idUri = settings.idUri;
+    config.sip.displayName = settings.displayName;
     config.sip.username = settings.username;
-    config.sip.password = settings.password;
+    config.sip.authUsername = settings.authUsername;
+    if (!settings.password.empty()) config.sip.password = settings.password;
     config.sip.domain = settings.domain;
     config.sip.registerOnStartup = settings.registerOnStartup;
     config.network.transport = "udp";
@@ -104,6 +136,8 @@ util::Result<void> saveGuiSettings(const std::filesystem::path& path,
     config.dtmf.volumeDbm0 = settings.inbandVolumeDbm0;
     config.logging.consoleLevel = settings.logLevel;
     config.logging.fileLevel = settings.logLevel;
+    config.behavior.ringtoneEnabled = settings.ringtoneEnabled;
+    config.behavior.topmostOnIncomingCall = settings.topmostOnIncomingCall;
 
     const auto validated = config::ConfigValidator::validate(config);
     if (!validated) return util::Result<void>::failure(validated.error());

@@ -156,22 +156,30 @@ TEST_SUITE("dtmf-plan") {
         CHECK(changed.gapMs == 150U);
         CHECK(changed.volumeDbm0 == -5);
 
+        REQUIRE(sender.applyRuntimeSettings(
+            polphone::dtmf::DtmfMethod::SipInfo, 320, 120, -7));
+        const auto applied = sender.settings();
+        CHECK(applied.defaultMethod == polphone::dtmf::DtmfMethod::SipInfo);
+        CHECK(applied.durationMs == 320U);
+        CHECK(applied.gapMs == 120U);
+        CHECK(applied.volumeDbm0 == -7);
+
         CHECK_FALSE(sender.setDurationMs(39));
         CHECK_FALSE(sender.setDurationMs(2001));
         CHECK_FALSE(sender.setGapMs(19));
         CHECK_FALSE(sender.setGapMs(2001));
         CHECK_FALSE(sender.setVolumeDbm0(-31));
         CHECK_FALSE(sender.setVolumeDbm0(1));
-        CHECK(sender.settings().durationMs == 250U);
+        CHECK(sender.settings().durationMs == 320U);
 
         const auto requestOverride = sender.send(polphone::dtmf::DtmfRequest{
             "5", polphone::dtmf::DtmfMethod::SipInfo, 400U, 300U, -20});
         CHECK_FALSE(requestOverride);
         const auto unchanged = sender.settings();
-        CHECK(unchanged.defaultMethod == polphone::dtmf::DtmfMethod::Inband);
-        CHECK(unchanged.durationMs == 250U);
-        CHECK(unchanged.gapMs == 150U);
-        CHECK(unchanged.volumeDbm0 == -5);
+        CHECK(unchanged.defaultMethod == polphone::dtmf::DtmfMethod::SipInfo);
+        CHECK(unchanged.durationMs == 320U);
+        CHECK(unchanged.gapMs == 120U);
+        CHECK(unchanged.volumeDbm0 == -7);
     }
 
     TEST_CASE("sender recusa envio sem chamada e sempre libera inFlight")
@@ -192,6 +200,9 @@ TEST_SUITE("dtmf-plan") {
         CHECK_FALSE(result);
         CHECK(result.error().message.find("Sem chamada ativa") != std::string::npos);
         CHECK_FALSE(sender.inFlight());
+        const auto lastSend = sender.lastSend();
+        CHECK(lastSend.method == polphone::dtmf::DtmfMethod::Rfc4733);
+        CHECK(lastSend.result.find("ERROR:") == 0U);
     }
 
     TEST_CASE("sender aplica os mesmos guards ao método in-band")
@@ -207,6 +218,7 @@ TEST_SUITE("dtmf-plan") {
         CHECK_FALSE(result);
         CHECK(result.error().message.find("Sem chamada ativa") != std::string::npos);
         CHECK_FALSE(sender.inFlight());
+        CHECK(sender.lastSend().method == polphone::dtmf::DtmfMethod::Inband);
     }
 
     TEST_CASE("converte dBm0 para amplitude PCM limitada")

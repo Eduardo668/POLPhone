@@ -16,6 +16,7 @@
 #include "logging/Logger.h"
 #include "sip/CallRegistry.h"
 #include "sip/SipAccount.h"
+#include "sip/SipCall.h"
 #include "sip/SipEndpoint.h"
 #include "util/Result.h"
 
@@ -44,9 +45,18 @@ struct ApplicationStatus {
     std::optional<int> playbackDevice;
     config::DtmfConfig dtmf;
     std::string dtmfMethod;
+    std::optional<dtmf::DtmfMethod> lastDtmfMethod;
+    std::string lastDtmfResult{"Nenhum envio"};
     int consoleLogLevel{0};
     bool mediaActive{false};
     bool muted{false};
+    int latestSipCode{0};
+    std::string registrarUri;
+    std::string transport;
+    std::string sipUsername;
+    std::string userAgent{"POLPhone/0.1.0 PJSUA2/2.17"};
+    config::BehaviorConfig behavior;
+    sip::CallDiagnostics callDiagnostics;
 };
 
 class Application final {
@@ -76,6 +86,11 @@ public:
     [[nodiscard]] util::Result<void> setDtmfDurationMs(int durationMs);
     [[nodiscard]] util::Result<void> setDtmfGapMs(int gapMs);
     [[nodiscard]] util::Result<void> setDtmfVolumeDbm0(int volumeDbm0);
+    [[nodiscard]] util::Result<void> applyDtmfSettings(
+        dtmf::DtmfMethod method,
+        int durationMs,
+        int gapMs,
+        int volumeDbm0);
     [[nodiscard]] util::Result<dtmf::DtmfResult> sendDtmf(
         std::string_view digits,
         std::optional<dtmf::DtmfMethod> method,

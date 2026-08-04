@@ -115,7 +115,7 @@ util::Result<void> MockTelephonyBackend::unregisterAccount()
         return util::Result<void>::failure(
             util::ErrorCode::Runtime, "Não existe registro ativo para remover.");
     }
-    if (state_.call != CallState::Idle) {
+    if (state_.call != CallState::Idle && state_.call != CallState::Disconnected) {
         return util::Result<void>::failure(
             util::ErrorCode::Runtime, "Encerre a chamada antes de remover o registro.");
     }
@@ -135,25 +135,28 @@ util::Result<void> MockTelephonyBackend::makeCall(std::string_view destination)
         return util::Result<void>::failure(
             util::ErrorCode::Runtime, "Conecte o registro antes de iniciar a chamada.");
     }
-    if (state_.call != CallState::Idle && state_.call != CallState::Failed) {
+    if (state_.call != CallState::Idle && state_.call != CallState::Disconnected
+        && state_.call != CallState::Error) {
         return util::Result<void>::failure(
             util::ErrorCode::Runtime, "O POLPhone suporta somente uma chamada ativa.");
     }
     auto validated = validateDestination(destination);
     if (!validated) return util::Result<void>::failure(validated.error());
     state_.maskedRemote = maskDestination(validated.value());
-    state_.call = CallState::Calling;
+    state_.remoteNumber = validated.value();
+    state_.callDirection = CallDirection::Outgoing;
+    state_.call = CallState::OutgoingDialing;
     state_.media = MediaState::Inactive;
     state_.friendlyError.clear();
     state_.technicalDetail.clear();
     state_.muted = false;
     change("[demo] Chamada de saída em estado Chamando.");
     schedule(450U, [this] {
-        state_.call = CallState::Connecting;
-        change("[demo] Chamada conectando.");
+        state_.call = CallState::OutgoingRinging;
+        change("[demo] Destino tocando.");
     });
     schedule(1050U, [this] {
-        state_.call = CallState::Confirmed;
+        state_.call = CallState::Active;
         state_.media = MediaState::Active;
         state_.codec = "PCMU/8000/1 (simulado)";
         confirmedAtMs_ = nowMs_;
@@ -164,14 +167,15 @@ util::Result<void> MockTelephonyBackend::makeCall(std::string_view destination)
 
 util::Result<void> MockTelephonyBackend::answerCall()
 {
-    if (state_.call != CallState::Incoming) {
+    if (state_.call != CallState::IncomingRinging
+        || state_.callDirection != CallDirection::Incoming) {
         return util::Result<void>::failure(
             util::ErrorCode::Runtime, "Não existe chamada recebida para atender.");
     }
     state_.call = CallState::Connecting;
     change("[demo] Atendimento solicitado.");
     schedule(450U, [this] {
-        state_.call = CallState::Confirmed;
+        state_.call = CallState::Active;
         state_.media = MediaState::Active;
         state_.codec = "PCMA/8000/1 (simulado)";
         confirmedAtMs_ = nowMs_;
@@ -182,36 +186,70 @@ util::Result<void> MockTelephonyBackend::answerCall()
 
 util::Result<void> MockTelephonyBackend::rejectCall()
 {
-    if (state_.call != CallState::Incoming) {
+    if (state_.call != CallState::IncomingRinging
+        || state_.callDirection != CallDirection::Incoming) {
         return util::Result<void>::failure(
             util::ErrorCode::Runtime, "Não existe chamada recebida para rejeitar.");
     }
-    state_.call = CallState::Ending;
-    change("[demo] Chamada recebida rejeitada com 603 Decline simulado.");
+    state_.call = CallState::Disconnecting;
+    change("[demo] Chamada recebida rejeitada com 486 Busy Here simulado.");
     schedule(300U, [this] { clearCall(); change("[demo] Chamada rejeitada e encerrada."); });
     return util::Result<void>::success();
 }
 
 util::Result<void> MockTelephonyBackend::hangupCall()
 {
-    if (state_.call == CallState::Idle || state_.call == CallState::Ending) {
+    if (state_.call == CallState::Idle || state_.call == CallState::Disconnected
+        || state_.call == CallState::Disconnecting) {
         return util::Result<void>::failure(
             util::ErrorCode::Runtime, "Não existe chamada ativa para encerrar.");
     }
-    state_.call = CallState::Ending;
+    state_.call = CallState::Disconnecting;
     state_.dtmfInFlight = false;
     change("[demo] Encerramento da chamada solicitado.");
     schedule(350U, [this] { clearCall(); change("[demo] Chamada encerrada."); });
     return util::Result<void>::success();
 }
 
+util::Result<void> MockTelephonyBackend::applyDtmfSettings(
+    const DtmfRuntimeSettings& settings)
+{
+    if (settings.method == DtmfMethod::Automatic) {
+        return util::Result<void>::failure(
+            util::ErrorCode::InvalidArgument,
+            "Escolha um método DTMF padrão explícito.");
+    }
+    if (settings.durationMs < 40U || settings.durationMs > 2000U
+        || settings.gapMs < 20U || settings.gapMs > 2000U
+        || settings.inbandVolumeDbm0 < -30 || settings.inbandVolumeDbm0 > 0) {
+        return util::Result<void>::failure(
+            util::ErrorCode::InvalidArgument,
+            "A configuração DTMF dinâmica é inválida.");
+    }
+    const bool changed = state_.dtmfConfiguredMethod != settings.method
+        || state_.dtmfEffectiveMethod != settings.method
+        || state_.dtmfDurationMs != settings.durationMs
+        || state_.dtmfGapMs != settings.gapMs
+        || state_.inbandVolumeDbm0 != settings.inbandVolumeDbm0;
+    if (!changed) return util::Result<void>::success();
+    const auto oldMethod = state_.dtmfEffectiveMethod;
+    state_.dtmfConfiguredMethod = settings.method;
+    state_.dtmfEffectiveMethod = settings.method;
+    state_.dtmfDurationMs = settings.durationMs;
+    state_.dtmfGapMs = settings.gapMs;
+    state_.inbandVolumeDbm0 = settings.inbandVolumeDbm0;
+    change("[demo] DTMF configuration changed: oldMethod="
+        + std::string(dtmfMethodText(oldMethod)) + " newMethod="
+        + std::string(dtmfMethodText(settings.method))
+        + " appliedAtRuntime=true");
+    return util::Result<void>::success();
+}
+
 util::Result<void> MockTelephonyBackend::sendDtmf(
     std::string_view digits,
-    DtmfMethod method,
-    unsigned durationMs,
-    unsigned gapMs)
+    DtmfMethod method)
 {
-    if (state_.call != CallState::Confirmed || state_.media != MediaState::Active) {
+    if (state_.call != CallState::Active || state_.media != MediaState::Active) {
         return util::Result<void>::failure(
             util::ErrorCode::Runtime, "DTMF só está disponível durante uma chamada com áudio ativo.");
     }
@@ -219,16 +257,18 @@ util::Result<void> MockTelephonyBackend::sendDtmf(
         return util::Result<void>::failure(
             util::ErrorCode::Runtime, "Já existe um envio DTMF em andamento.");
     }
-    auto plan = dtmf::DtmfPlan::build(digits, durationMs, gapMs);
+    auto plan = dtmf::DtmfPlan::build(
+        digits, state_.dtmfDurationMs, state_.dtmfGapMs);
     if (!plan) return util::Result<void>::failure(plan.error());
     const DtmfMethod effective = method == DtmfMethod::Automatic
-        ? DtmfMethod::Rfc4733 : method;
-    state_.dtmfMethod = effective;
-    state_.dtmfDurationMs = durationMs;
-    state_.dtmfGapMs = gapMs;
+        ? state_.dtmfEffectiveMethod : method;
+    state_.lastDtmfMethod = effective;
+    state_.lastDtmfResult = "Em andamento";
     state_.dtmfInFlight = true;
-    change("[demo] DTMF simulado iniciado por " + std::string(dtmfMethodText(effective))
-        + "; os dígitos não são registrados.");
+    change("[demo] DTMF simulado: configuredMethod="
+        + std::string(dtmfMethodText(state_.dtmfConfiguredMethod))
+        + " effectiveMethod=" + std::string(dtmfMethodText(effective))
+        + " digit=[REDACTED] status=IN_PROGRESS.");
     std::uint64_t total = 0U;
     for (const auto& step : plan.value()) {
         total += step.kind == dtmf::DtmfPlanStep::Kind::Pause
@@ -236,6 +276,7 @@ util::Result<void> MockTelephonyBackend::sendDtmf(
     }
     schedule((std::max)(total, std::uint64_t{100}), [this] {
         state_.dtmfInFlight = false;
+        state_.lastDtmfResult = "OK";
         change("[demo] Envio DTMF simulado concluído.");
     });
     return util::Result<void>::success();
@@ -243,7 +284,7 @@ util::Result<void> MockTelephonyBackend::sendDtmf(
 
 util::Result<void> MockTelephonyBackend::setMuted(bool muted)
 {
-    if (state_.call != CallState::Confirmed) {
+    if (state_.call != CallState::Active) {
         return util::Result<void>::failure(
             util::ErrorCode::Runtime, "O mudo só pode ser alterado durante uma chamada.");
     }
@@ -287,8 +328,11 @@ util::Result<void> MockTelephonyBackend::simulate(DemoScenario scenario)
                 util::ErrorCode::Runtime,
                 "A chamada recebida simulada exige registro conectado e nenhuma chamada ativa.");
         }
-        state_.call = CallState::Incoming;
+        state_.callDirection = CallDirection::Incoming;
+        state_.call = CallState::IncomingRinging;
         state_.maskedRemote = "******4321";
+        state_.remoteDisplayName = "Maria Demo";
+        state_.remoteNumber = "4321";
         state_.friendlyError.clear();
         change("[demo] Chamada recebida simulada.");
         break;
@@ -310,12 +354,13 @@ util::Result<void> MockTelephonyBackend::simulate(DemoScenario scenario)
                 util::ErrorCode::Runtime,
                 "A falha de chamada exige registro conectado e nenhuma chamada ativa.");
         }
-        state_.call = CallState::Calling;
+        state_.callDirection = CallDirection::Outgoing;
+        state_.call = CallState::OutgoingDialing;
         state_.maskedRemote = "****9999";
         state_.friendlyError.clear();
         change("[demo] Simulando chamada que falhará.");
         schedule(600U, [this] {
-            state_.call = CallState::Failed;
+            state_.call = CallState::Error;
             state_.friendlyError = "A chamada simulada não pôde ser completada.";
             state_.technicalDetail = "486 Busy Here (simulado)";
             change("[demo] Falha de chamada simulada.");
@@ -335,8 +380,11 @@ util::Result<void> MockTelephonyBackend::simulate(DemoScenario scenario)
 void MockTelephonyBackend::clearCall()
 {
     state_.call = CallState::Idle;
+    state_.callDirection = CallDirection::None;
     state_.media = MediaState::Inactive;
     state_.maskedRemote.clear();
+    state_.remoteDisplayName.clear();
+    state_.remoteNumber.clear();
     state_.codec.clear();
     state_.muted = false;
     state_.dtmfInFlight = false;
@@ -361,7 +409,7 @@ void MockTelephonyBackend::tick(std::chrono::milliseconds elapsed)
             executed = true;
         }
     }
-    if (state_.call == CallState::Confirmed && confirmedAtMs_ != 0U) {
+    if (state_.call == CallState::Active && confirmedAtMs_ != 0U) {
         const auto duration = (nowMs_ - confirmedAtMs_) / 1000U;
         if (duration != state_.callDurationSeconds) {
             state_.callDurationSeconds = duration;

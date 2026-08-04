@@ -27,9 +27,10 @@ TEST_SUITE("core-presentation") {
         CHECK(registrationStateText(RegistrationState::Disconnected) == "Desconectado");
         CHECK(registrationStateText(RegistrationState::Connecting) == "Conectando");
         CHECK(registrationStateText(RegistrationState::Connected) == "Conectado");
-        CHECK(callStateText(CallState::Calling) == "Chamando");
-        CHECK(callStateText(CallState::Confirmed) == "Em chamada");
-        CHECK(callStateText(CallState::Ending) == "Encerrando");
+        CHECK(callStateText(CallState::OutgoingDialing) == "Chamando…");
+        CHECK(callStateText(CallState::IncomingRinging) == "Chamada recebida");
+        CHECK(callStateText(CallState::Active) == "Em chamada");
+        CHECK(callStateText(CallState::Disconnecting) == "Encerrando");
         CHECK(mediaStateText(MediaState::Active) == "Áudio ativo");
     }
 
@@ -67,14 +68,15 @@ TEST_SUITE("core-presentation") {
         CHECK_FALSE(commands.answerCall);
         CHECK_FALSE(commands.sendDtmf);
 
-        state.call = CallState::Incoming;
+        state.call = CallState::IncomingRinging;
+        state.callDirection = CallDirection::Incoming;
         commands = commandAvailability(state);
         CHECK(commands.answerCall);
         CHECK(commands.rejectCall);
         CHECK(commands.hangupCall);
         CHECK_FALSE(commands.makeCall);
 
-        state.call = CallState::Confirmed;
+        state.call = CallState::Active;
         state.media = MediaState::Active;
         commands = commandAvailability(state);
         CHECK(commands.mute);
@@ -85,7 +87,7 @@ TEST_SUITE("core-presentation") {
     TEST_CASE("DTMF permanece indisponível sem mídia ou durante envio")
     {
         auto state = connectedIdle();
-        state.call = CallState::Confirmed;
+        state.call = CallState::Active;
         CHECK_FALSE(commandAvailability(state).sendDtmf);
         state.media = MediaState::Active;
         state.dtmfInFlight = true;
@@ -109,7 +111,7 @@ TEST_SUITE("core-presentation") {
     {
         PhoneViewModel model;
         auto state = connectedIdle();
-        state.call = CallState::Confirmed;
+        state.call = CallState::Active;
         state.media = MediaState::Active;
         model.update(state);
         CHECK(model.beginHangup());
@@ -143,5 +145,86 @@ TEST_SUITE("core-presentation") {
         model.setDtmfMethod(DtmfMethod::Rfc4733);
         CHECK_FALSE(model.ivrMode());
         CHECK(model.selectedDtmfMethod() == DtmfMethod::Rfc4733);
+    }
+
+    TEST_CASE("extrai caller ID com display name, ramal e fallback")
+    {
+        const auto named = parseCallerIdentity("\"João Silva\" <sip:1309@pbx.invalid>");
+        CHECK(named.displayName == "João Silva");
+        CHECK(named.number == "1309");
+        const auto anonymous = parseCallerIdentity("sip:9991@pbx.invalid");
+        CHECK(anonymous.displayName == "9991");
+        CHECK(anonymous.number == "9991");
+    }
+
+    TEST_CASE("máquina de estados identifica entrada e ignora evento repetido")
+    {
+        auto state = connectedIdle();
+        PhoneEvent incoming;
+        incoming.type = PhoneEventType::IncomingCallReceived;
+        incoming.direction = CallDirection::Incoming;
+        incoming.remoteDisplayName = "João Silva";
+        incoming.remoteNumber = "1309";
+        incoming.remoteUri = "sip:1309@pbx.invalid";
+        CHECK(applyPhoneEvent(state, incoming));
+        CHECK(state.call == CallState::IncomingRinging);
+        CHECK(state.callDirection == CallDirection::Incoming);
+        CHECK(commandAvailability(state).answerCall);
+        CHECK(commandAvailability(state).rejectCall);
+        CHECK_FALSE(commandAvailability(state).makeCall);
+        const auto revision = state.revision;
+        CHECK_FALSE(applyPhoneEvent(state, incoming));
+        CHECK(state.revision == revision);
+    }
+
+    TEST_CASE("atender, ativar mídia e desconectar são idempotentes")
+    {
+        auto state = connectedIdle();
+        CHECK(applyPhoneEvent(state, {PhoneEventType::IncomingCallReceived,
+                                      CallDirection::Incoming}));
+        CHECK(applyPhoneEvent(state, {PhoneEventType::CallAnswered}));
+        CHECK(state.call == CallState::Connecting);
+        CHECK(applyPhoneEvent(state, {PhoneEventType::MediaActivated}));
+        CHECK(state.call == CallState::Active);
+        const auto activeRevision = state.revision;
+        CHECK_FALSE(applyPhoneEvent(state, {PhoneEventType::CallAnswered}));
+        CHECK(state.call == CallState::Active);
+        CHECK_FALSE(applyPhoneEvent(state, {PhoneEventType::MediaActivated}));
+        CHECK(state.revision == activeRevision);
+        CHECK(applyPhoneEvent(state, {PhoneEventType::CallDisconnected}));
+        const auto disconnectedRevision = state.revision;
+        CHECK_FALSE(applyPhoneEvent(state, {PhoneEventType::MediaActivated}));
+        CHECK(state.call == CallState::Disconnected);
+        CHECK_FALSE(applyPhoneEvent(state, {PhoneEventType::CallDisconnected}));
+        CHECK(state.revision == disconnectedRevision);
+    }
+
+    TEST_CASE("segunda chamada não substitui chamada ativa")
+    {
+        auto state = connectedIdle();
+        state.call = CallState::Active;
+        state.callDirection = CallDirection::Outgoing;
+        state.remoteNumber = "600";
+        CHECK_FALSE(applyPhoneEvent(state, {PhoneEventType::IncomingCallReceived,
+                                            CallDirection::Incoming,
+                                            "Outro", "9991"}));
+        CHECK(state.call == CallState::Active);
+        CHECK(state.callDirection == CallDirection::Outgoing);
+        CHECK(state.remoteNumber == "600");
+    }
+
+    TEST_CASE("segunda chamada recebida não substitui primeira já ativa")
+    {
+        auto state = connectedIdle();
+        state.call = CallState::Active;
+        state.callDirection = CallDirection::Incoming;
+        state.remoteNumber = "600";
+        state.maskedRemote = "sip:600@pbx.invalid";
+        CHECK_FALSE(applyPhoneEvent(state, {PhoneEventType::IncomingCallReceived,
+                                            CallDirection::Incoming,
+                                            "Outro", "9991",
+                                            "sip:9991@pbx.invalid"}));
+        CHECK(state.call == CallState::Active);
+        CHECK(state.remoteNumber == "600");
     }
 }

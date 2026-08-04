@@ -5,14 +5,15 @@
 #include <winrt/Microsoft.UI.Xaml.Media.h>
 #include <winrt/Microsoft.UI.Xaml.h>
 #include <winrt/Windows.UI.h>
+#include <winrt/base.h>
 
 namespace polphone::gui::theme {
 
-// Fonte única da identidade POL. #0a3b68 = RGB(10, 59, 104).
-inline constexpr winrt::Windows::UI::Color Primary{255, 10, 59, 104};
-inline constexpr winrt::Windows::UI::Color PrimaryHover{255, 8, 49, 87};
-inline constexpr winrt::Windows::UI::Color PrimaryPressed{255, 6, 39, 70};
-inline constexpr winrt::Windows::UI::Color PrimarySoft{255, 232, 241, 248};
+// Fonte única da identidade POL. #0A6087 = RGB(10, 96, 135).
+inline constexpr winrt::Windows::UI::Color Primary{255, 10, 96, 135};
+inline constexpr winrt::Windows::UI::Color PrimaryHover{255, 8, 81, 114};
+inline constexpr winrt::Windows::UI::Color PrimaryPressed{255, 6, 65, 92};
+inline constexpr winrt::Windows::UI::Color PrimarySoft{255, 229, 241, 247};
 inline constexpr winrt::Windows::UI::Color Surface{255, 255, 255, 255};
 inline constexpr winrt::Windows::UI::Color SurfaceMuted{255, 246, 248, 250};
 inline constexpr winrt::Windows::UI::Color Overlay{190, 246, 248, 250};

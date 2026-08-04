@@ -38,9 +38,11 @@ std::string AppConfig::redactedDump() const
     const nlohmann::json document = {
         {"sip",
          {{"idUri", redactSecret(sip.idUri, sip.password)},
+          {"displayName", redactSecret(sip.displayName, sip.password)},
           {"registrarUri", redactSecret(sip.registrarUri, sip.password)},
           {"realm", redactSecret(sip.realm, sip.password)},
           {"username", redactSecret(sip.username, sip.password)},
+          {"authUsername", redactSecret(sip.authUsername, sip.password)},
           {"password", "***"},
           {"domain", redactSecret(sip.domain, sip.password)},
           {"proxyUri", redactSecret(sip.proxyUri, sip.password)},
@@ -74,6 +76,9 @@ std::string AppConfig::redactedDump() const
           {"directory", redactSecret(logging.directory, sip.password)},
           {"maxFileMB", logging.maxFileMB},
           {"sipMessageTrace", logging.sipMessageTrace}}},
+        {"behavior",
+         {{"ringtoneEnabled", behavior.ringtoneEnabled},
+          {"topmostOnIncomingCall", behavior.topmostOnIncomingCall}}},
     };
     return document.dump();
 }

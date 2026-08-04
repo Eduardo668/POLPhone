@@ -44,6 +44,23 @@ app::RegistrationState registrationStateFor(
 
 } // namespace
 
+std::string authenticationUsername(const config::SipConfig& config)
+{
+    return config.authUsername.empty() ? config.username : config.authUsername;
+}
+
+std::string accountIdentityUri(const config::SipConfig& config)
+{
+    if (config.displayName.empty()) return config.idUri;
+    std::string escaped;
+    escaped.reserve(config.displayName.size());
+    for (const char character : config.displayName) {
+        if (character == '\\' || character == '"') escaped.push_back('\\');
+        escaped.push_back(character);
+    }
+    return "\"" + escaped + "\" <" + config.idUri + ">";
+}
+
 std::string registrationStatusMessage(
     int sipCode,
     pj_status_t transportStatus,
@@ -97,14 +114,14 @@ util::Result<void> SipAccount::createFrom(const config::SipConfig& config)
     }
 
     pj::AccountConfig accountConfig;
-    accountConfig.idUri = config.idUri;
+    accountConfig.idUri = accountIdentityUri(config);
     accountConfig.regConfig.registrarUri = config.registrarUri;
     accountConfig.regConfig.registerOnAdd = config.registerOnStartup;
     accountConfig.regConfig.timeoutSec = static_cast<unsigned>(config.regTimeoutSec);
     accountConfig.regConfig.retryIntervalSec =
         static_cast<unsigned>(config.regRetryIntervalSec);
     accountConfig.sipConfig.authCreds.emplace_back(
-        "digest", config.realm, config.username, 0, config.password);
+        "digest", config.realm, authenticationUsername(config), 0, config.password);
     if (!config.proxyUri.empty()) accountConfig.sipConfig.proxies.push_back(config.proxyUri);
 
     state_.updateRegistration(app::RegistrationSnapshot{
@@ -244,16 +261,31 @@ void SipAccount::onIncomingCall(pj::OnIncomingCallParam& parameter) noexcept
         }
 
         auto call = std::make_unique<SipCall>(
-            *this, calls_, state_, events_, logger_, parameter.callId);
+            *this,
+            calls_,
+            state_,
+            events_,
+            logger_,
+            app::CallDirection::Incoming,
+            parameter.callId);
         SipCall* adoptedCall = call.get();
         const auto adopted = calls_.adopt(call);
         if (!adopted) {
             static_cast<void>(call->answer(PJSIP_SC_BUSY_HERE));
+            static_cast<void>(logger_.warning(
+                "call",
+                "Segunda chamada entrante recusada com 486 Busy Here; "
+                "a chamada atual foi preservada."));
+            return;
+        }
+        const auto announced = adoptedCall->announceIncoming();
+        if (!announced) {
+            static_cast<void>(adoptedCall->answer(PJSIP_SC_BUSY_HERE));
+            publishCallbackFailure("onIncomingCall", announced.error().detail);
             return;
         }
         const auto ringing = adoptedCall->answer(PJSIP_SC_RINGING);
         if (!ringing) {
-            calls_.retire(adoptedCall);
             publishCallbackFailure("onIncomingCall", ringing.error().detail);
             return;
         }

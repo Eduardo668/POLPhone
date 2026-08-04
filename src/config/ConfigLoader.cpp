@@ -141,15 +141,18 @@ util::Result<void> parseSip(const Json& root, AppConfig& config, Warnings* warni
         return util::Result<void>::success();
     }
     warnUnknownFields(*section,
-                      {"idUri", "registrarUri", "realm", "username", "password", "domain",
-                       "proxyUri", "regTimeoutSec", "regRetryIntervalSec", "registerOnStartup"},
+                      {"idUri", "displayName", "registrarUri", "realm", "username",
+                       "authUsername", "password", "domain", "proxyUri", "regTimeoutSec",
+                       "regRetryIntervalSec", "registerOnStartup"},
                       "sip",
                       warnings);
 
     if (const auto result = readString(*section, "idUri", "sip.idUri", config.sip.idUri); !result) return result;
+    if (const auto result = readString(*section, "displayName", "sip.displayName", config.sip.displayName); !result) return result;
     if (const auto result = readString(*section, "registrarUri", "sip.registrarUri", config.sip.registrarUri); !result) return result;
     if (const auto result = readString(*section, "realm", "sip.realm", config.sip.realm); !result) return result;
     if (const auto result = readString(*section, "username", "sip.username", config.sip.username); !result) return result;
+    if (const auto result = readString(*section, "authUsername", "sip.authUsername", config.sip.authUsername); !result) return result;
     if (const auto result = readString(*section, "password", "sip.password", config.sip.password); !result) return result;
     if (const auto result = readString(*section, "domain", "sip.domain", config.sip.domain); !result) return result;
     if (const auto result = readString(*section, "proxyUri", "sip.proxyUri", config.sip.proxyUri); !result) return result;
@@ -254,6 +257,24 @@ util::Result<void> parseLogging(const Json& root, AppConfig& config, Warnings* w
     return readBool(*section, "sipMessageTrace", "logging.sipMessageTrace", config.logging.sipMessageTrace);
 }
 
+util::Result<void> parseBehavior(const Json& root, AppConfig& config, Warnings* warnings)
+{
+    const auto sectionResult = optionalObject(root, "behavior");
+    if (!sectionResult) return util::Result<void>::failure(sectionResult.error());
+    const Json* section = sectionResult.value();
+    if (section == nullptr) return util::Result<void>::success();
+    warnUnknownFields(
+        *section, {"ringtoneEnabled", "topmostOnIncomingCall"}, "behavior", warnings);
+    if (const auto result = readBool(*section, "ringtoneEnabled",
+                                     "behavior.ringtoneEnabled",
+                                     config.behavior.ringtoneEnabled); !result) {
+        return result;
+    }
+    return readBool(*section, "topmostOnIncomingCall",
+                    "behavior.topmostOnIncomingCall",
+                    config.behavior.topmostOnIncomingCall);
+}
+
 } // namespace
 
 util::Result<AppConfig> ConfigLoader::load(const std::filesystem::path& path, Warnings* warnings)
@@ -310,7 +331,7 @@ util::Result<AppConfig> ConfigLoader::parse(std::string_view document, Warnings*
             "$" );
     }
 
-    warnUnknownFields(root, {"$schema", "sip", "network", "audio", "codecs", "dtmf", "logging"}, "", warnings);
+    warnUnknownFields(root, {"$schema", "sip", "network", "audio", "codecs", "dtmf", "logging", "behavior"}, "", warnings);
 
     AppConfig config;
     if (const auto result = parseSip(root, config, warnings); !result) {
@@ -329,6 +350,9 @@ util::Result<AppConfig> ConfigLoader::parse(std::string_view document, Warnings*
         return util::Result<AppConfig>::failure(result.error());
     }
     if (const auto result = parseLogging(root, config, warnings); !result) {
+        return util::Result<AppConfig>::failure(result.error());
+    }
+    if (const auto result = parseBehavior(root, config, warnings); !result) {
         return util::Result<AppConfig>::failure(result.error());
     }
     return util::Result<AppConfig>::success(std::move(config));

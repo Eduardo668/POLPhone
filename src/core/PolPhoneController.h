@@ -34,11 +34,11 @@ public:
     [[nodiscard]] std::future<util::Result<void>> answerCall();
     [[nodiscard]] std::future<util::Result<void>> rejectCall();
     [[nodiscard]] std::future<util::Result<void>> hangupCall();
+    [[nodiscard]] std::future<util::Result<void>> applyDtmfSettings(
+        DtmfRuntimeSettings settings);
     [[nodiscard]] std::future<util::Result<void>> sendDtmf(
         std::string digits,
-        DtmfMethod method,
-        unsigned durationMs,
-        unsigned gapMs);
+        DtmfMethod method);
     [[nodiscard]] std::future<util::Result<void>> setMuted(bool muted);
     [[nodiscard]] std::future<util::Result<std::vector<AudioDevice>>> listAudioDevices();
     [[nodiscard]] std::future<util::Result<void>> selectCaptureDevice(int id);

@@ -10,6 +10,7 @@ add_executable(polphone_tests
     test_dtmf_plan.cpp
     test_pj_errors.cpp
     test_redactor.cpp
+    test_settings_service.cpp
     test_sip_call.cpp
     test_strings.cpp
 )

@@ -38,7 +38,8 @@ mesmas bibliotecas estáticas e mantém todos os comandos e códigos de saída.
 ## Fachada e snapshots
 
 `PolPhoneController` oferece inicialização, shutdown, registro, chamada, atendimento, rejeição,
-desligamento, DTMF, mudo e dispositivos. Cada operação é enfileirada em uma thread de trabalho e
+desligamento, aplicação dinâmica da configuração DTMF, envio DTMF, mudo e dispositivos. Cada
+operação é enfileirada em uma thread de trabalho e
 retorna `future<Result<void>>`. A interface permanece livre para processar entrada e desenho.
 
 O snapshot contém estado do aplicativo, registro, chamada e mídia; destino mascarado; duração;
@@ -84,6 +85,17 @@ A tela de configurações reúne URI do servidor/proxy, registrar, ID URI, usuá
 UDP, registro automático, dispositivos, DTMF e log. O arquivo só é substituído depois de passar pelo
 `ConfigValidator`; gravação inválida preserva o anterior. A senha é um `PasswordBox`, é limpa após
 salvar e não integra mensagens de erro.
+
+Salvar executa duas ações separadas: `SettingsService` persiste o JSON e
+`PolPhoneController::applyDtmfSettings` atualiza explicitamente o `DtmfSender` já existente. Método,
+duração, intervalo e volume in-band passam a valer sem recriar conta, registro ou aplicação. Cada
+envio consulta o estado efetivo atual e tira um único snapshot: se uma sequência já estiver em
+execução, ela termina com os valores com que começou; o próximo dígito enviado, inclusive na mesma
+chamada, usa os novos valores. Aplicar novamente valores idênticos é uma operação idempotente.
+
+O diagnóstico diferencia a configuração solicitada/persistida, a configuração efetiva em memória,
+o método do último envio e seu resultado. Uma falha na aplicação em runtime permanece visível, sem
+apresentar o valor salvo como se já estivesse efetivo.
 
 O diagnóstico mostra apenas snapshots e logs previamente sanitizados. Ele não expõe senha,
 Authorization, nonce, números completos ou cabeçalhos SIP brutos; a ação de copiar usa exatamente o

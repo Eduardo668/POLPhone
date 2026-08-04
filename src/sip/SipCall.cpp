@@ -173,12 +173,14 @@ SipCall::SipCall(pj::Account& account,
                  app::AppState& state,
                  app::EventQueue& events,
                  logging::Logger& logger,
+                 app::CallDirection direction,
                  int callId)
     : pj::Call(account, callId),
       registry_(registry),
       state_(state),
       events_(events),
-      logger_(logger)
+      logger_(logger),
+      direction_(direction)
 {
     ++liveCount_;
     try {
@@ -191,7 +193,7 @@ SipCall::SipCall(pj::Account& account,
 SipCall::~SipCall()
 {
     failPendingInfo(PJSIP_SC_CALL_TSX_DOES_NOT_EXIST, "Chamada destruída");
-    disconnectAudio();
+    disconnectAudio(false, false);
     --liveCount_;
     try {
         static_cast<void>(logger_.debug(
@@ -207,21 +209,55 @@ util::Result<void> SipCall::start(std::string destinationUri)
     const auto started = POLPHONE_PJ_TRY(makeCall(destinationUri_, parameter));
     if (!started) return started;
     state_.updateCall(app::CallSnapshot{
-        app::CallState::Calling, 0, {}, destinationUri_});
+        app::CallState::Calling, direction_, 0, {}, destinationUri_});
+    return util::Result<void>::success();
+}
+
+util::Result<void> SipCall::announceIncoming()
+{
+    const auto information = POLPHONE_PJ_TRY(getInfo());
+    if (!information) return util::Result<void>::failure(information.error());
+    destinationUri_ = information.value().remoteUri;
+    state_.updateCall(app::CallSnapshot{
+        app::CallState::Incoming,
+        direction_,
+        static_cast<int>(information.value().lastStatusCode),
+        information.value().lastReason,
+        destinationUri_});
     return util::Result<void>::success();
 }
 
 util::Result<void> SipCall::answer(int statusCode)
 {
+    const bool finalIncomingResponse = direction_ == app::CallDirection::Incoming
+        && statusCode >= PJSIP_SC_OK;
+    if (finalIncomingResponse) {
+        int expected = 0;
+        if (!incomingFinalResponse_.compare_exchange_strong(expected, statusCode)) {
+            if (expected == statusCode) return util::Result<void>::success();
+            return util::Result<void>::failure(
+                util::ErrorCode::Runtime,
+                "A chamada recebida já teve uma resposta local final.",
+                "SIP " + std::to_string(expected));
+        }
+    }
     pj::CallOpParam parameter(true);
     parameter.statusCode = static_cast<pjsip_status_code>(statusCode);
-    return POLPHONE_PJ_TRY(pj::Call::answer(parameter));
+    auto answered = POLPHONE_PJ_TRY(pj::Call::answer(parameter));
+    if (!answered && finalIncomingResponse) {
+        int expected = statusCode;
+        static_cast<void>(incomingFinalResponse_.compare_exchange_strong(expected, 0));
+    }
+    return answered;
 }
 
 util::Result<void> SipCall::hangupCall()
 {
+    if (hangupRequested_.exchange(true)) return util::Result<void>::success();
     pj::CallOpParam parameter(true);
-    return POLPHONE_PJ_TRY(hangup(parameter));
+    auto hungUp = POLPHONE_PJ_TRY(hangup(parameter));
+    if (!hungUp) hangupRequested_ = false;
+    return hungUp;
 }
 
 util::Result<DtmfInfoResponse> SipCall::sendDtmfInfo(
@@ -328,6 +364,7 @@ util::Result<void> SipCall::setMuted(bool muted)
             util::ErrorCode::Runtime,
             "O áudio da chamada ainda não está ativo.");
     }
+    if (muted_.load() == muted) return util::Result<void>::success();
     try {
         std::optional<pj::AudioMedia> media;
         {
@@ -343,6 +380,10 @@ util::Result<void> SipCall::setMuted(bool muted)
             .audDevManager().getCaptureDevMedia();
         if (muted) capture.stopTransmit(*media);
         else capture.startTransmit(*media);
+        {
+            std::lock_guard<std::mutex> lock(mediaMutex_);
+            captureConnected_ = !muted;
+        }
         muted_ = muted;
         static_cast<void>(events_.push(app::UiEvent{
             app::UiEventSeverity::Info,
@@ -358,6 +399,8 @@ bool SipCall::isMuted() const noexcept
 {
     return muted_.load();
 }
+
+app::CallDirection SipCall::direction() const noexcept { return direction_; }
 
 bool SipCall::canReap() const noexcept
 {
@@ -406,11 +449,15 @@ void SipCall::onCallState(pj::OnCallStateParam&) noexcept
             failPendingInfo(
                 PJSIP_SC_CALL_TSX_DOES_NOT_EXIST,
                 "Call/Transaction Does Not Exist");
-            disconnectAudio();
+            // O PJSUA remove o conference port ao destruir o stream. Neste
+            // ponto só limpamos nosso bookkeeping para não desconectar uma
+            // porta que já deixou de existir.
+            disconnectAudio(false, false);
         }
         const auto state = callStateFromPjsip(information.state);
         state_.updateCall(app::CallSnapshot{
             state,
+            direction_,
             static_cast<int>(information.lastStatusCode),
             information.lastReason,
             information.remoteUri});
@@ -590,18 +637,18 @@ void SipCall::onCallMediaState(pj::OnCallMediaStateParam&) noexcept
                 break;
             }
             case PJSUA_CALL_MEDIA_ERROR:
-                disconnectAudio();
+                disconnectAudio(false, false);
                 publishMediaFailure(
                     "A negociação de mídia falhou; a chamada continuará sinalizada.",
                     "mediaIndex=" + std::to_string(media.index));
                 break;
             case PJSUA_CALL_MEDIA_NONE:
-                disconnectAudio();
+                disconnectAudio(false, false);
                 break;
             }
         }
         if (!foundAudio) {
-            disconnectAudio();
+            disconnectAudio(false, false);
             static_cast<void>(logger_.info(
                 "media", "A chamada não possui fluxo de áudio negociado."));
         }
@@ -616,10 +663,17 @@ void SipCall::onCallMediaState(pj::OnCallMediaStateParam&) noexcept
 
 util::Result<void> SipCall::connectAudio(unsigned mediaIndex)
 {
-    disconnectAudio();
-    bool receiveConnected = false;
     try {
         pj::AudioMedia callMedia = getAudioMedia(static_cast<int>(mediaIndex));
+        const int callSlot = callMedia.getPortId();
+        {
+            std::lock_guard<std::mutex> lock(mediaMutex_);
+            if (audioConnected_.load() && audioConfSlot_.load() == callSlot
+                && audioMedia_.has_value()) {
+                return util::Result<void>::success();
+            }
+        }
+        disconnectAudio();
         pj::AudDevManager& manager = pj::Endpoint::instance().audDevManager();
         pj::AudioMedia& playback = manager.getPlaybackDevMedia();
         pj::AudioMedia& capture = manager.getCaptureDevMedia();
@@ -627,17 +681,33 @@ util::Result<void> SipCall::connectAudio(unsigned mediaIndex)
         {
             std::lock_guard<std::mutex> lock(mediaMutex_);
             audioMedia_ = callMedia;
-            audioConfSlot_ = callMedia.getPortId();
+            audioConfSlot_ = callSlot;
+            activeMediaIndex_ = mediaIndex;
         }
         callMedia.startTransmit(playback);
-        receiveConnected = true;
+        {
+            std::lock_guard<std::mutex> lock(mediaMutex_);
+            playbackConnected_ = true;
+        }
         capture.startTransmit(callMedia);
+        {
+            std::lock_guard<std::mutex> lock(mediaMutex_);
+            captureConnected_ = true;
+        }
         audioConnected_ = true;
         muted_ = false;
 
         try {
             const pj::StreamInfo stream = getStreamInfo(mediaIndex);
             const pj::MediaTransportInfo transport = getMedTransportInfo(mediaIndex);
+            {
+                std::lock_guard<std::mutex> lock(mediaMutex_);
+                diagnostics_.codec = stream.codecName + "/"
+                    + std::to_string(stream.codecClockRate);
+                diagnostics_.localRtp = transport.localRtpName;
+                diagnostics_.remoteRtp = stream.remoteRtpAddress.empty()
+                    ? transport.srcRtpName : stream.remoteRtpAddress;
+            }
             static_cast<void>(logger_.info(
                 "media",
                 "Áudio bidirecional conectado: codec=" + stream.codecName + "/"
@@ -661,20 +731,6 @@ util::Result<void> SipCall::connectAudio(unsigned mediaIndex)
         }
         return util::Result<void>::success();
     } catch (const pj::Error& error) {
-        if (receiveConnected) {
-            try {
-                std::optional<pj::AudioMedia> media;
-                {
-                    std::lock_guard<std::mutex> lock(mediaMutex_);
-                    media = audioMedia_;
-                }
-                if (media.has_value()) {
-                    media->stopTransmit(
-                        pj::Endpoint::instance().audDevManager().getPlaybackDevMedia());
-                }
-            } catch (...) {
-            }
-        }
         disconnectAudio();
         return util::Result<void>::failure(makePjError(error, "conectar áudio da chamada"));
     } catch (const std::exception& error) {
@@ -691,40 +747,74 @@ util::Result<void> SipCall::connectAudio(unsigned mediaIndex)
     }
 }
 
-void SipCall::disconnectAudio(bool retainMedia) noexcept
+void SipCall::disconnectAudio(bool retainMedia, bool stopTransmissions) noexcept
 {
     try {
         std::optional<pj::AudioMedia> media;
+        bool stopPlayback = false;
+        bool stopCapture = false;
         {
             std::lock_guard<std::mutex> lock(mediaMutex_);
             media = audioMedia_;
+            stopPlayback = playbackConnected_;
+            stopCapture = captureConnected_;
+            playbackConnected_ = false;
+            captureConnected_ = false;
+            audioConnected_ = false;
+            muted_ = false;
+            if (!retainMedia) {
+                audioMedia_.reset();
+                audioConfSlot_ = PJSUA_INVALID_ID;
+                diagnostics_ = CallDiagnostics{};
+            }
         }
-        if (media.has_value() && audioConnected_.load()) {
+        if (stopTransmissions && media.has_value()) {
             pj::AudDevManager& manager = pj::Endpoint::instance().audDevManager();
-            try {
-                media->stopTransmit(manager.getPlaybackDevMedia());
-            } catch (const pj::Error& error) {
-                static_cast<void>(logger_.warning(
-                    "media", "Falha ao desconectar reprodução: " + describe(error)));
+            if (stopPlayback) {
+                try {
+                    media->stopTransmit(manager.getPlaybackDevMedia());
+                } catch (const pj::Error& error) {
+                    static_cast<void>(logger_.warning(
+                        "media", "Falha ao desconectar reprodução: " + describe(error)));
+                }
             }
-            try {
-                manager.getCaptureDevMedia().stopTransmit(*media);
-            } catch (const pj::Error& error) {
-                static_cast<void>(logger_.warning(
-                    "media", "Falha ao desconectar captura: " + describe(error)));
+            if (stopCapture) {
+                try {
+                    manager.getCaptureDevMedia().stopTransmit(*media);
+                } catch (const pj::Error& error) {
+                    static_cast<void>(logger_.warning(
+                        "media", "Falha ao desconectar captura: " + describe(error)));
+                }
             }
-        }
-        audioConnected_ = false;
-        muted_ = false;
-        if (!retainMedia) {
-            std::lock_guard<std::mutex> lock(mediaMutex_);
-            audioMedia_.reset();
-            audioConfSlot_ = PJSUA_INVALID_ID;
         }
     } catch (...) {
         audioConnected_ = false;
         muted_ = false;
         if (!retainMedia) audioConfSlot_ = PJSUA_INVALID_ID;
+    }
+}
+
+CallDiagnostics SipCall::diagnostics() const
+{
+    try {
+        CallDiagnostics result;
+        unsigned mediaIndex = 0U;
+        {
+            std::lock_guard<std::mutex> lock(mediaMutex_);
+            result = diagnostics_;
+            mediaIndex = activeMediaIndex_;
+        }
+        if (!audioConnected_.load()) return result;
+        const pj::StreamStat statistics = getStreamStat(mediaIndex);
+        result.packetsSent = statistics.rtcp.txStat.pkt;
+        result.packetsReceived = statistics.rtcp.rxStat.pkt;
+        result.packetsLost = statistics.rtcp.rxStat.loss;
+        result.jitterMs = static_cast<double>(statistics.rtcp.rxStat.jitterUsec.mean) / 1000.0;
+        result.hasRtpStatistics = true;
+        return result;
+    } catch (...) {
+        std::lock_guard<std::mutex> lock(mediaMutex_);
+        return diagnostics_;
     }
 }
 

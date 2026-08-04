@@ -14,7 +14,9 @@ struct GuiSettings {
     std::string serverSip;
     std::string registrarUri;
     std::string idUri;
+    std::string displayName;
     std::string username;
+    std::string authUsername;
     std::string password;
     std::string domain;
     bool registerOnStartup{true};
@@ -25,7 +27,14 @@ struct GuiSettings {
     int dtmfGapMs{100};
     int inbandVolumeDbm0{-10};
     int logLevel{4};
+    bool ringtoneEnabled{true};
+    bool topmostOnIncomingCall{false};
 };
+
+// Carrega somente valores não secretos para preencher a interface. A senha
+// nunca é devolvida à GUI; deixar o campo vazio preserva o segredo existente.
+[[nodiscard]] POLPHONE_CORE_API util::Result<GuiSettings> loadGuiSettings(
+    const std::filesystem::path& path);
 
 // Valida com ConfigValidator e somente então substitui o arquivo de destino.
 // A senha integra o documento persistido, mas nunca aparece em erros ou logs.

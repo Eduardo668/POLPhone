@@ -216,11 +216,12 @@ add_library(polphone_telephony STATIC
     src/core/Presentation.cpp
     src/core/MockTelephonyBackend.cpp
     src/core/PolPhoneController.cpp
+    src/core/SettingsService.cpp
 )
 target_include_directories(polphone_telephony PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(polphone_telephony
-    PUBLIC polphone_util polphone_logging polphone_dtmf_plan
-    PRIVATE polphone_warnings
+    PUBLIC polphone_util polphone_logging polphone_dtmf_plan polphone_config
+    PRIVATE nlohmann_json polphone_warnings
 )
 target_compile_options(polphone_telephony PRIVATE
     $<$<CONFIG:Debug>:/Zi;/Od;/RTC1>

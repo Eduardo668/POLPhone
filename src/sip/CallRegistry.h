@@ -23,6 +23,26 @@ class SipCall;
 
 class CallRegistry final {
 public:
+    class Lease final {
+    public:
+        Lease() = default;
+        ~Lease();
+        Lease(Lease&& other) noexcept;
+        Lease& operator=(Lease&& other) noexcept;
+        Lease(const Lease&) = delete;
+        Lease& operator=(const Lease&) = delete;
+
+        [[nodiscard]] SipCall* get() const noexcept;
+        [[nodiscard]] SipCall* operator->() const noexcept;
+        explicit operator bool() const noexcept;
+
+    private:
+        friend class CallRegistry;
+        explicit Lease(SipCall* call) noexcept;
+        void reset() noexcept;
+        SipCall* call_{nullptr};
+    };
+
     CallRegistry() = default;
     ~CallRegistry();
 
@@ -30,9 +50,11 @@ public:
     CallRegistry& operator=(const CallRegistry&) = delete;
 
     [[nodiscard]] util::Result<void> adopt(std::unique_ptr<SipCall>& call);
-    [[nodiscard]] SipCall* current() const noexcept;
+    // Mantém a chamada viva enquanto operações externas usam o ponteiro.
+    [[nodiscard]] Lease acquireCurrent() const noexcept;
     [[nodiscard]] bool hasActiveCall() const noexcept;
     void retire(SipCall* call) noexcept;
+    void retireCurrent() noexcept;
     [[nodiscard]] std::size_t reap() noexcept;
     [[nodiscard]] std::size_t retiredCount() const noexcept;
 

@@ -15,9 +15,11 @@ namespace polphone::config {
 
 struct SipConfig {
     std::string idUri;
+    std::string displayName;
     std::string registrarUri;
     std::string realm{"*"};
     std::string username;
+    std::string authUsername;
     std::string password;
     std::string domain;
     std::string proxyUri;
@@ -71,6 +73,11 @@ struct LoggingConfig {
     bool sipMessageTrace{true};
 };
 
+struct BehaviorConfig {
+    bool ringtoneEnabled{true};
+    bool topmostOnIncomingCall{false};
+};
+
 struct AppConfig {
     SipConfig sip;
     NetworkConfig network;
@@ -78,6 +85,7 @@ struct AppConfig {
     CodecsConfig codecs;
     DtmfConfig dtmf;
     LoggingConfig logging;
+    BehaviorConfig behavior;
 
     [[nodiscard]] std::string redactedDump() const;
 };

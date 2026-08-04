@@ -144,16 +144,47 @@ DtmfSettings DtmfSender::settings() const
     return settings_;
 }
 
-util::Result<void> DtmfSender::setDefaultMethod(DtmfMethod method)
+DtmfLastSend DtmfSender::lastSend() const
+{
+    std::lock_guard<std::mutex> lock(lastSendMutex_);
+    return lastSend_;
+}
+
+util::Result<void> DtmfSender::applyRuntimeSettings(
+    DtmfMethod method,
+    int durationMs,
+    int gapMs,
+    int volumeDbm0)
 {
     if (!executionPathFor(method).has_value()) {
         return util::Result<void>::failure(
             util::ErrorCode::InvalidArgument,
             "O método DTMF informado não é suportado.");
     }
+    const auto timing = DtmfPlan::build(
+        "5", static_cast<unsigned>(durationMs), static_cast<unsigned>(gapMs));
+    if (!timing) return util::Result<void>::failure(timing.error());
+    if (volumeDbm0 < -30 || volumeDbm0 > 0) {
+        return util::Result<void>::failure(
+            util::ErrorCode::InvalidArgument,
+            "O volume DTMF deve estar entre -30 e 0 dBm0.");
+    }
     std::lock_guard<std::mutex> lock(settingsMutex_);
     settings_.defaultMethod = method;
+    settings_.durationMs = static_cast<unsigned>(durationMs);
+    settings_.gapMs = static_cast<unsigned>(gapMs);
+    settings_.volumeDbm0 = volumeDbm0;
     return util::Result<void>::success();
+}
+
+util::Result<void> DtmfSender::setDefaultMethod(DtmfMethod method)
+{
+    const auto current = settings();
+    return applyRuntimeSettings(
+        method,
+        static_cast<int>(current.durationMs),
+        static_cast<int>(current.gapMs),
+        current.volumeDbm0);
 }
 
 util::Result<void> DtmfSender::setDurationMs(int durationMs)
@@ -163,9 +194,10 @@ util::Result<void> DtmfSender::setDurationMs(int durationMs)
             util::ErrorCode::InvalidArgument,
             "A duração DTMF deve estar entre 40 e 2000 ms.");
     }
-    std::lock_guard<std::mutex> lock(settingsMutex_);
-    settings_.durationMs = static_cast<unsigned>(durationMs);
-    return util::Result<void>::success();
+    const auto current = settings();
+    return applyRuntimeSettings(
+        current.defaultMethod, durationMs,
+        static_cast<int>(current.gapMs), current.volumeDbm0);
 }
 
 util::Result<void> DtmfSender::setGapMs(int gapMs)
@@ -175,9 +207,10 @@ util::Result<void> DtmfSender::setGapMs(int gapMs)
             util::ErrorCode::InvalidArgument,
             "O intervalo DTMF deve estar entre 20 e 2000 ms.");
     }
-    std::lock_guard<std::mutex> lock(settingsMutex_);
-    settings_.gapMs = static_cast<unsigned>(gapMs);
-    return util::Result<void>::success();
+    const auto current = settings();
+    return applyRuntimeSettings(
+        current.defaultMethod, static_cast<int>(current.durationMs),
+        gapMs, current.volumeDbm0);
 }
 
 util::Result<void> DtmfSender::setVolumeDbm0(int volumeDbm0)
@@ -187,9 +220,20 @@ util::Result<void> DtmfSender::setVolumeDbm0(int volumeDbm0)
             util::ErrorCode::InvalidArgument,
             "O volume DTMF deve estar entre -30 e 0 dBm0.");
     }
-    std::lock_guard<std::mutex> lock(settingsMutex_);
-    settings_.volumeDbm0 = volumeDbm0;
-    return util::Result<void>::success();
+    const auto current = settings();
+    return applyRuntimeSettings(
+        current.defaultMethod, static_cast<int>(current.durationMs),
+        static_cast<int>(current.gapMs), volumeDbm0);
+}
+
+void DtmfSender::recordLastSend(DtmfMethod method, std::string result) noexcept
+{
+    try {
+        std::lock_guard<std::mutex> lock(lastSendMutex_);
+        lastSend_.method = method;
+        lastSend_.result = std::move(result);
+    } catch (...) {
+    }
 }
 
 bool DtmfSender::inFlight() const noexcept
@@ -212,37 +256,37 @@ void DtmfSender::InFlightGuard::dismiss() noexcept
     active_ = false;
 }
 
-util::Result<sip::SipCall*> DtmfSender::activeCall() const
+util::Result<sip::CallRegistry::Lease> DtmfSender::activeCall() const
 {
-    sip::SipCall* call = calls_.current();
-    if (call == nullptr) {
-        return util::Result<sip::SipCall*>::failure(
+    auto lease = calls_.acquireCurrent();
+    if (!lease) {
+        return util::Result<sip::CallRegistry::Lease>::failure(
             util::ErrorCode::Runtime,
             "Sem chamada ativa para enviar DTMF.");
     }
     const auto snapshot = state_.call();
     if (snapshot.state != app::CallState::Confirmed) {
-        return util::Result<sip::SipCall*>::failure(
+        return util::Result<sip::CallRegistry::Lease>::failure(
             util::ErrorCode::Runtime,
             "A chamada ainda não está estabelecida; aguarde o estado CONFIRMED.",
             std::string(app::callStateName(snapshot.state)));
     }
-    if (!call->hasActiveAudio()) {
-        return util::Result<sip::SipCall*>::failure(
+    if (!lease->hasActiveAudio()) {
+        return util::Result<sip::CallRegistry::Lease>::failure(
             util::ErrorCode::Runtime,
             "A mídia de áudio não está ativa; o DTMF não foi enviado.");
     }
-    const auto information = POLPHONE_PJ_TRY(call->getInfo());
+    const auto information = POLPHONE_PJ_TRY(lease->getInfo());
     if (!information) {
-        return util::Result<sip::SipCall*>::failure(information.error());
+        return util::Result<sip::CallRegistry::Lease>::failure(information.error());
     }
     if (information.value().state != PJSIP_INV_STATE_CONFIRMED) {
-        return util::Result<sip::SipCall*>::failure(
+        return util::Result<sip::CallRegistry::Lease>::failure(
             util::ErrorCode::Runtime,
             "A sessão SIP não está confirmada; o DTMF não foi enviado.",
             information.value().stateText);
     }
-    return util::Result<sip::SipCall*>::success(call);
+    return util::Result<sip::CallRegistry::Lease>::success(std::move(lease));
 }
 
 util::Result<int> DtmfSender::telephoneEventPayloadType(sip::SipCall& call) const
@@ -407,6 +451,8 @@ util::Result<void> DtmfSender::performInband(
     const DtmfRequest& request,
     std::string_view correlationId)
 {
+    const std::string configuredMethod = std::string(methodName(request.configuredMethod));
+    const std::string effectiveMethod = std::string(methodName(request.method));
     if (toneGenerator_ == nullptr) {
         try {
             toneGenerator_ = std::make_unique<audio::ToneGenerator>();
@@ -488,7 +534,7 @@ util::Result<void> DtmfSender::performInband(
                 "O envio DTMF in-band foi cancelado pelo encerramento.");
         }
         const auto active = activeCall();
-        if (!active || active.value() != &call) {
+        if (!active || active.value().get() != &call) {
             return util::Result<void>::failure(
                 util::ErrorCode::Runtime,
                 "A chamada terminou ou mudou durante o DTMF in-band.");
@@ -518,7 +564,8 @@ util::Result<void> DtmfSender::performInband(
             static_cast<void>(logger_.log(
                 logging::LogLevel::Info,
                 "dtmf",
-                "method=inband idx=" + std::to_string(globalIndex) + "/"
+                "configuredMethod=" + configuredMethod + " effectiveMethod="
+                    + effectiveMethod + " idx=" + std::to_string(globalIndex) + "/"
                     + std::to_string(totalDigits) + " digit="
                     + std::string(1U, step.digit) + " duration="
                     + std::to_string(step.onMs) + "ms gap="
@@ -539,7 +586,7 @@ util::Result<void> DtmfSender::performInband(
                     "O envio DTMF in-band foi cancelado pelo encerramento.");
             }
             const auto stillActive = activeCall();
-            if (!stillActive || stillActive.value() != &call) {
+            if (!stillActive || stillActive.value().get() != &call) {
                 return util::Result<void>::failure(
                     util::ErrorCode::Runtime,
                     "A chamada terminou durante a reprodução DTMF in-band.");
@@ -553,7 +600,8 @@ util::Result<void> DtmfSender::performInband(
                 static_cast<void>(logger_.log(
                     logging::LogLevel::Info,
                     "dtmf",
-                    "method=inband idx=" + std::to_string(absoluteIndex) + "/"
+                    "configuredMethod=" + configuredMethod + " effectiveMethod="
+                        + effectiveMethod + " idx=" + std::to_string(absoluteIndex) + "/"
                         + std::to_string(totalDigits) + " digit="
                         + std::string(1U, batch[completedInBatch].digit)
                         + " status=OK elapsed=" + std::to_string(elapsed) + "ms",
@@ -576,7 +624,8 @@ util::Result<void> DtmfSender::performInband(
             static_cast<void>(logger_.log(
                 logging::LogLevel::Info,
                 "dtmf",
-                "method=inband idx=" + std::to_string(absoluteIndex) + "/"
+                "configuredMethod=" + configuredMethod + " effectiveMethod="
+                    + effectiveMethod + " idx=" + std::to_string(absoluteIndex) + "/"
                     + std::to_string(totalDigits) + " digit="
                     + std::string(1U, batch[completedInBatch].digit)
                     + " status=OK elapsed=" + std::to_string(elapsed) + "ms",
@@ -592,6 +641,7 @@ void DtmfSender::publishInbandFailure(
     std::string_view correlationId,
     const util::Error& error) noexcept
 {
+    recordLastSend(DtmfMethod::Inband, "ERROR: " + error.message);
     try {
         static_cast<void>(logger_.log(
             logging::LogLevel::Error,
@@ -657,6 +707,7 @@ void DtmfSender::runInband(
     }
     call->releaseExternalUse();
     if (success) {
+        recordLastSend(DtmfMethod::Inband, "OK");
         try {
             static_cast<void>(events_.push(app::UiEvent{
                 app::UiEventSeverity::Info,
@@ -701,6 +752,7 @@ util::Result<DtmfResult> DtmfSender::send(const DtmfRequest& request)
             util::ErrorCode::InvalidArgument,
             "O método DTMF informado não possui um caminho de execução.");
     }
+    recordLastSend(request.method, "Em andamento");
 
     std::string correlationId;
     try {
@@ -715,14 +767,19 @@ util::Result<DtmfResult> DtmfSender::send(const DtmfRequest& request)
     if (!started) return util::Result<DtmfResult>::failure(started.error());
     InFlightGuard flight(*this);
 
-    const auto active = activeCall();
-    if (!active) return util::Result<DtmfResult>::failure(active.error());
-    sip::SipCall* call = active.value();
+    auto active = activeCall();
+    if (!active) {
+        recordLastSend(request.method, "ERROR: " + active.error().message);
+        return util::Result<DtmfResult>::failure(active.error());
+    }
+    auto callLease = std::move(active).value();
+    sip::SipCall* call = callLease.get();
 
     if (*executionPath == DtmfExecutionPath::Inband) {
         auto inband = startInband(
             *call, std::move(plan).value(), request, std::move(correlationId));
         if (inband) flight.dismiss();
+        else recordLastSend(request.method, "ERROR: " + inband.error().message);
         return inband;
     }
 
@@ -762,14 +819,16 @@ util::Result<DtmfResult> DtmfSender::send(const DtmfRequest& request)
     }
 
     std::size_t digitIndex = 0U;
-    const std::string method = std::string(methodName(request.method));
+    const std::string configuredMethod = std::string(methodName(request.configuredMethod));
+    const std::string effectiveMethod = std::string(methodName(request.method));
     for (const auto& step : plan.value()) {
         if (step.kind == DtmfPlanStep::Kind::Pause) {
             std::this_thread::sleep_for(std::chrono::milliseconds(step.pauseMs));
             continue;
         }
         const auto stillActive = activeCall();
-        if (!stillActive || stillActive.value() != call) {
+        if (!stillActive || stillActive.value().get() != call) {
+            recordLastSend(request.method, "ERROR: chamada indisponível");
             return util::Result<DtmfResult>::failure(
                 util::ErrorCode::Runtime,
                 "A chamada terminou ou mudou durante o envio DTMF.");
@@ -778,7 +837,8 @@ util::Result<DtmfResult> DtmfSender::send(const DtmfRequest& request)
         static_cast<void>(logger_.log(
             logging::LogLevel::Info,
             "dtmf",
-            "method=" + method + " idx=" + std::to_string(digitIndex) + "/"
+            "configuredMethod=" + configuredMethod + " effectiveMethod="
+                + effectiveMethod + " idx=" + std::to_string(digitIndex) + "/"
                 + std::to_string(digitCount) + " digit=" + std::string(1U, step.digit)
                 + " duration=" + std::to_string(step.onMs) + "ms gap="
                 + std::to_string(step.offMs) + "ms enviando",
@@ -792,11 +852,13 @@ util::Result<DtmfResult> DtmfSender::send(const DtmfRequest& request)
             static_cast<void>(logger_.log(
                 logging::LogLevel::Error,
                 "dtmf",
-                "method=" + method + " idx=" + std::to_string(digitIndex) + "/"
+                "configuredMethod=" + configuredMethod + " effectiveMethod="
+                    + effectiveMethod + " idx=" + std::to_string(digitIndex) + "/"
                     + std::to_string(digitCount) + " digit="
                     + std::string(1U, step.digit) + " status=ERROR",
                 sent.error().detail,
                 correlationId));
+            recordLastSend(request.method, "ERROR: " + sent.error().message);
             return util::Result<DtmfResult>::failure(sent.error());
         }
         std::this_thread::sleep_for(
@@ -806,7 +868,8 @@ util::Result<DtmfResult> DtmfSender::send(const DtmfRequest& request)
         static_cast<void>(logger_.log(
             logging::LogLevel::Info,
             "dtmf",
-            "method=" + method + " idx=" + std::to_string(digitIndex) + "/"
+            "configuredMethod=" + configuredMethod + " effectiveMethod="
+                + effectiveMethod + " idx=" + std::to_string(digitIndex) + "/"
                 + std::to_string(digitCount) + " digit=" + std::string(1U, step.digit)
                 + " status=OK elapsed=" + std::to_string(elapsed) + "ms",
             {},
@@ -821,6 +884,7 @@ util::Result<DtmfResult> DtmfSender::send(const DtmfRequest& request)
         app::UiEventSeverity::Info,
         "dtmf",
         "id=" + correlationId + " concluído: " + result.summary}));
+    recordLastSend(request.method, "OK");
     return util::Result<DtmfResult>::success(std::move(result));
 }
 

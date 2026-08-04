@@ -2,9 +2,11 @@
   "$schema": "./polphone.config.schema.json",
   "sip": {
     "idUri": "sip:REPLACE_ME@REPLACE_ME.invalid",
+    "displayName": "Operador POL",
     "registrarUri": "sip:REPLACE_ME.invalid:5060",
     "realm": "*",
     "username": "REPLACE_ME",
+    "authUsername": "REPLACE_ME",
     "password": "REPLACE_ME",
     "domain": "REPLACE_ME.invalid",
     "proxyUri": "",
@@ -51,5 +53,9 @@
     "directory": "logs",
     "maxFileMB": 50,
     "sipMessageTrace": true
+  },
+  "behavior": {
+    "ringtoneEnabled": true,
+    "topmostOnIncomingCall": false
   }
 }

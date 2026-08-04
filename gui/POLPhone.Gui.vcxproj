@@ -68,7 +68,7 @@
       <AppContainer>false</AppContainer>
       <SubSystem>Windows</SubSystem>
       <AdditionalLibraryDirectories>$(ProjectDir)..\build\$(Configuration);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>polphone_core_runtime.lib;shell32.lib;user32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>polphone_core_runtime.lib;shell32.lib;user32.lib;winmm.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <GenerateDebugInformation>true</GenerateDebugInformation>
     </Link>
   </ItemDefinitionGroup>
@@ -77,11 +77,13 @@
     <ClInclude Include="..\src\core\CoreApi.h" />
     <ClInclude Include="..\src\core\SettingsService.h" />
     <ClInclude Include="MainWindow.h" />
+    <ClInclude Include="RingtoneService.h" />
     <ClInclude Include="Theme.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="App.cpp" />
     <ClCompile Include="MainWindow.cpp" />
+    <ClCompile Include="RingtoneService.cpp" />
     <ClCompile Include="main.cpp" />
   </ItemGroup>
   <ItemGroup>

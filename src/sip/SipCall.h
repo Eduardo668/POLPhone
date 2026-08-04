@@ -19,6 +19,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <condition_variable>
 #include <deque>
 #include <memory>
@@ -38,6 +39,17 @@ struct DtmfInfoResponse {
     bool timedOut{false};
 };
 
+struct CallDiagnostics {
+    std::string codec;
+    std::string localRtp;
+    std::string remoteRtp;
+    std::uint64_t packetsSent{0};
+    std::uint64_t packetsReceived{0};
+    std::uint64_t packetsLost{0};
+    double jitterMs{0.0};
+    bool hasRtpStatistics{false};
+};
+
 [[nodiscard]] util::Result<std::string> normalizeDestination(
     std::string_view destination,
     std::string_view domain,
@@ -55,6 +67,7 @@ public:
             app::AppState& state,
             app::EventQueue& events,
             logging::Logger& logger,
+            app::CallDirection direction,
             int callId = PJSUA_INVALID_ID);
     ~SipCall() override;
 
@@ -62,6 +75,7 @@ public:
     SipCall& operator=(const SipCall&) = delete;
 
     [[nodiscard]] util::Result<void> start(std::string destinationUri);
+    [[nodiscard]] util::Result<void> announceIncoming();
     [[nodiscard]] util::Result<void> answer(int statusCode = PJSIP_SC_OK);
     [[nodiscard]] util::Result<void> hangupCall();
     [[nodiscard]] bool canReap() const noexcept;
@@ -73,6 +87,8 @@ public:
     [[nodiscard]] bool hasActiveAudio() const noexcept;
     [[nodiscard]] util::Result<void> setMuted(bool muted);
     [[nodiscard]] bool isMuted() const noexcept;
+    [[nodiscard]] app::CallDirection direction() const noexcept;
+    [[nodiscard]] CallDiagnostics diagnostics() const;
     [[nodiscard]] util::Result<DtmfInfoResponse> sendDtmfInfo(
         char digit,
         unsigned durationMs,
@@ -98,7 +114,8 @@ private:
     void publishPjCallbackFailure(std::string_view callback,
                                   const pj::Error& error) noexcept;
     [[nodiscard]] util::Result<void> connectAudio(unsigned mediaIndex);
-    void disconnectAudio(bool retainMedia = false) noexcept;
+    void disconnectAudio(bool retainMedia = false,
+                         bool stopTransmissions = true) noexcept;
     void publishMediaFailure(std::string_view message,
                              std::string_view detail = {}) noexcept;
     void handleInfoTransaction(const pj::SipTransaction& transaction) noexcept;
@@ -117,12 +134,21 @@ private:
     app::AppState& state_;
     app::EventQueue& events_;
     logging::Logger& logger_;
+    const app::CallDirection direction_;
     std::string destinationUri_;
     mutable std::mutex mediaMutex_;
     std::optional<pj::AudioMedia> audioMedia_;
     std::atomic<int> audioConfSlot_{PJSUA_INVALID_ID};
     std::atomic<bool> audioConnected_{false};
     std::atomic<bool> muted_{false};
+    // Somente a primeira decisão local final (200/486/etc.) pode produzir
+    // sinalização. Isso torna duplo clique e comandos atrasados inofensivos.
+    std::atomic<int> incomingFinalResponse_{0};
+    std::atomic<bool> hangupRequested_{false};
+    bool playbackConnected_{false};
+    bool captureConnected_{false};
+    unsigned activeMediaIndex_{0U};
+    CallDiagnostics diagnostics_;
     mutable std::mutex infoMutex_;
     std::condition_variable infoCondition_;
     std::shared_ptr<PendingInfo> pendingInfo_;

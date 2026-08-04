@@ -48,21 +48,27 @@ TEST_SUITE("config") {
         CHECK(config.dtmf.durationMs == 160);
         CHECK(config.logging.consoleLevel == 4);
         CHECK(config.logging.maxFileMB == 50);
+        CHECK(config.behavior.ringtoneEnabled);
+        CHECK_FALSE(config.behavior.topmostOnIncomingCall);
     }
 
     TEST_CASE("campos informados substituem defaults sem apagar prioridades omitidas")
     {
         const auto loaded = ConfigLoader::parse(R"({
-            "sip": {"idUri":"sip:test@example.invalid","password":"T06_ONLY_SYNTHETIC_SECRET"},
+            "sip": {"idUri":"sip:test@example.invalid","displayName":"Operador",
+                    "authUsername":"digest-user","password":"T06_ONLY_SYNTHETIC_SECRET"},
             "network": {"localPort":5060},
             "audio": {"captureDevice":"#3","noVad":false},
             "codecs": {"priority":{"PCMU/8000/1":200}},
             "dtmf": {"defaultMethod":"info","volumeDbm0":-20},
             "logging": {"directory":"diagnostic-logs","sipMessageTrace":false}
+            ,"behavior": {"ringtoneEnabled":false,"topmostOnIncomingCall":true}
         })");
         REQUIRE(loaded);
         const auto& config = loaded.value();
         CHECK(config.sip.idUri == "sip:test@example.invalid");
+        CHECK(config.sip.displayName == "Operador");
+        CHECK(config.sip.authUsername == "digest-user");
         CHECK(config.sip.password == kSyntheticPassword);
         CHECK(config.network.localPort == 5060);
         CHECK(config.audio.captureDevice == "#3");
@@ -73,6 +79,8 @@ TEST_SUITE("config") {
         CHECK(config.dtmf.volumeDbm0 == -20);
         CHECK(config.logging.directory == "diagnostic-logs");
         CHECK_FALSE(config.logging.sipMessageTrace);
+        CHECK_FALSE(config.behavior.ringtoneEnabled);
+        CHECK(config.behavior.topmostOnIncomingCall);
     }
 
     TEST_CASE("tipo errado aponta o caminho completo do campo")

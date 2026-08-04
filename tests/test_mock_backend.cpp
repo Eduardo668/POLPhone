@@ -27,7 +27,7 @@ void confirmedCall(MockTelephonyBackend& backend)
     readyAndRegistered(backend);
     REQUIRE(backend.makeCall("5511999991234"));
     backend.tick(1050ms);
-    REQUIRE(backend.getState().call == CallState::Confirmed);
+    REQUIRE(backend.getState().call == CallState::Active);
 }
 
 } // namespace
@@ -62,12 +62,13 @@ TEST_SUITE("mock-backend") {
         MockTelephonyBackend backend;
         readyAndRegistered(backend);
         REQUIRE(backend.makeCall("5511999991234"));
-        CHECK(backend.getState().call == CallState::Calling);
+        CHECK(backend.getState().call == CallState::OutgoingDialing);
+        CHECK(backend.getState().callDirection == CallDirection::Outgoing);
         CHECK(backend.getState().maskedRemote == "*********1234");
         backend.tick(450ms);
-        CHECK(backend.getState().call == CallState::Connecting);
+        CHECK(backend.getState().call == CallState::OutgoingRinging);
         backend.tick(600ms);
-        CHECK(backend.getState().call == CallState::Confirmed);
+        CHECK(backend.getState().call == CallState::Active);
         CHECK(backend.getState().media == MediaState::Active);
     }
 
@@ -87,19 +88,61 @@ TEST_SUITE("mock-backend") {
     {
         MockTelephonyBackend backend;
         readyAndRegistered(backend);
-        CHECK_FALSE(backend.sendDtmf("5", DtmfMethod::Rfc4733, 160, 100));
+        CHECK_FALSE(backend.sendDtmf("5", DtmfMethod::Rfc4733));
     }
 
     TEST_CASE("DTMF usa exatamente um método e bloqueia concorrência")
     {
         MockTelephonyBackend backend;
         confirmedCall(backend);
-        REQUIRE(backend.sendDtmf("12#", DtmfMethod::Inband, 160, 100));
+        REQUIRE(backend.sendDtmf("12#", DtmfMethod::Inband));
         CHECK(backend.getState().dtmfInFlight);
-        CHECK(backend.getState().dtmfMethod == DtmfMethod::Inband);
-        CHECK_FALSE(backend.sendDtmf("5", DtmfMethod::SipInfo, 160, 100));
+        CHECK(backend.getState().lastDtmfMethod == DtmfMethod::Inband);
+        CHECK_FALSE(backend.sendDtmf("5", DtmfMethod::SipInfo));
         backend.tick(780ms);
         CHECK_FALSE(backend.getState().dtmfInFlight);
+    }
+
+    TEST_CASE("configuração DTMF muda em runtime e o próximo envio usa o valor efetivo")
+    {
+        MockTelephonyBackend backend;
+        confirmedCall(backend);
+        CHECK(backend.getState().dtmfConfiguredMethod == DtmfMethod::Rfc4733);
+        CHECK(backend.getState().dtmfEffectiveMethod == DtmfMethod::Rfc4733);
+
+        REQUIRE(backend.applyDtmfSettings(
+            {DtmfMethod::SipInfo, 240U, 140U, -8}));
+        REQUIRE(backend.sendDtmf("5", DtmfMethod::Automatic));
+        auto status = backend.getState();
+        CHECK(status.dtmfConfiguredMethod == DtmfMethod::SipInfo);
+        CHECK(status.dtmfEffectiveMethod == DtmfMethod::SipInfo);
+        CHECK(status.lastDtmfMethod == DtmfMethod::SipInfo);
+        CHECK(status.dtmfDurationMs == 240U);
+        CHECK(status.dtmfGapMs == 140U);
+        CHECK(status.inbandVolumeDbm0 == -8);
+        backend.tick(500ms);
+        CHECK(backend.getState().lastDtmfResult == "OK");
+
+        REQUIRE(backend.applyDtmfSettings(
+            {DtmfMethod::Inband, 300U, 90U, -4}));
+        REQUIRE(backend.sendDtmf("6", DtmfMethod::Automatic));
+        status = backend.getState();
+        CHECK(status.dtmfConfiguredMethod == DtmfMethod::Inband);
+        CHECK(status.dtmfEffectiveMethod == DtmfMethod::Inband);
+        CHECK(status.lastDtmfMethod == DtmfMethod::Inband);
+        CHECK(status.dtmfDurationMs == 300U);
+        CHECK(status.dtmfGapMs == 90U);
+        CHECK(status.inbandVolumeDbm0 == -4);
+    }
+
+    TEST_CASE("aplicar a mesma configuração DTMF é idempotente")
+    {
+        MockTelephonyBackend backend;
+        const DtmfRuntimeSettings settings{DtmfMethod::SipInfo, 160U, 100U, -10};
+        REQUIRE(backend.applyDtmfSettings(settings));
+        const auto revision = backend.getState().revision;
+        REQUIRE(backend.applyDtmfSettings(settings));
+        CHECK(backend.getState().revision == revision);
     }
 
     TEST_CASE("mudo alterna somente durante chamada confirmada")
@@ -120,11 +163,13 @@ TEST_SUITE("mock-backend") {
         MockTelephonyBackend backend;
         readyAndRegistered(backend);
         REQUIRE(backend.simulate(DemoScenario::IncomingCall));
-        CHECK(backend.getState().call == CallState::Incoming);
+        CHECK(backend.getState().call == CallState::IncomingRinging);
+        CHECK(backend.getState().callDirection == CallDirection::Incoming);
+        CHECK(backend.getState().remoteDisplayName == "Maria Demo");
         REQUIRE(backend.answerCall());
         CHECK(backend.getState().call == CallState::Connecting);
         backend.tick(450ms);
-        CHECK(backend.getState().call == CallState::Confirmed);
+        CHECK(backend.getState().call == CallState::Active);
     }
 
     TEST_CASE("chamada recebida pode ser rejeitada")
@@ -133,7 +178,7 @@ TEST_SUITE("mock-backend") {
         readyAndRegistered(backend);
         REQUIRE(backend.simulate(DemoScenario::IncomingCall));
         REQUIRE(backend.rejectCall());
-        CHECK(backend.getState().call == CallState::Ending);
+        CHECK(backend.getState().call == CallState::Disconnecting);
         backend.tick(300ms);
         CHECK(backend.getState().call == CallState::Idle);
     }
@@ -156,7 +201,7 @@ TEST_SUITE("mock-backend") {
         readyAndRegistered(backend);
         REQUIRE(backend.simulate(DemoScenario::CallFailure));
         backend.tick(600ms);
-        CHECK(backend.getState().call == CallState::Failed);
+        CHECK(backend.getState().call == CallState::Error);
         CHECK(backend.getState().technicalDetail.find("486") != std::string::npos);
     }
 
@@ -174,7 +219,7 @@ TEST_SUITE("mock-backend") {
     {
         MockTelephonyBackend backend;
         confirmedCall(backend);
-        REQUIRE(backend.sendDtmf("9876", DtmfMethod::SipInfo, 160, 100));
+        REQUIRE(backend.sendDtmf("9876", DtmfMethod::SipInfo));
         for (const auto& line : backend.getState().sanitizedLogs) {
             CHECK(line.find("9876") == std::string::npos);
             CHECK(line.find("password") == std::string::npos);

@@ -108,15 +108,20 @@ std::future<util::Result<void>> PolPhoneController::hangupCall()
     return submit([](TelephonyBackend& backend) { return backend.hangupCall(); });
 }
 
+std::future<util::Result<void>> PolPhoneController::applyDtmfSettings(
+    DtmfRuntimeSettings settings)
+{
+    return submit([settings](TelephonyBackend& backend) {
+        return backend.applyDtmfSettings(settings);
+    });
+}
+
 std::future<util::Result<void>> PolPhoneController::sendDtmf(
     std::string digits,
-    DtmfMethod method,
-    unsigned durationMs,
-    unsigned gapMs)
+    DtmfMethod method)
 {
-    return submit([
-        digits = std::move(digits), method, durationMs, gapMs](TelephonyBackend& backend) {
-        return backend.sendDtmf(digits, method, durationMs, gapMs);
+    return submit([digits = std::move(digits), method](TelephonyBackend& backend) {
+        return backend.sendDtmf(digits, method);
     });
 }
 

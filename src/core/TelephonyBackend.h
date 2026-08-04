@@ -23,11 +23,11 @@ public:
     [[nodiscard]] virtual util::Result<void> answerCall() = 0;
     [[nodiscard]] virtual util::Result<void> rejectCall() = 0;
     [[nodiscard]] virtual util::Result<void> hangupCall() = 0;
+    [[nodiscard]] virtual util::Result<void> applyDtmfSettings(
+        const DtmfRuntimeSettings& settings) = 0;
     [[nodiscard]] virtual util::Result<void> sendDtmf(
         std::string_view digits,
-        DtmfMethod method,
-        unsigned durationMs,
-        unsigned gapMs) = 0;
+        DtmfMethod method) = 0;
     [[nodiscard]] virtual util::Result<void> setMuted(bool muted) = 0;
     [[nodiscard]] virtual util::Result<std::vector<AudioDevice>> listAudioDevices() = 0;
     [[nodiscard]] virtual util::Result<void> selectAudioDevice(

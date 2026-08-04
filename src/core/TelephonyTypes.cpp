@@ -32,14 +32,26 @@ std::string_view callStateText(CallState state) noexcept
 {
     switch (state) {
     case CallState::Idle: return "Sem chamada";
-    case CallState::Incoming: return "Chamada recebida";
-    case CallState::Calling: return "Chamando";
+    case CallState::OutgoingDialing: return "Chamando…";
+    case CallState::OutgoingRinging: return "Destino tocando";
+    case CallState::IncomingRinging: return "Chamada recebida";
     case CallState::Connecting: return "Conectando chamada";
-    case CallState::Confirmed: return "Em chamada";
-    case CallState::Ending: return "Encerrando";
-    case CallState::Failed: return "Falha na chamada";
+    case CallState::Active: return "Em chamada";
+    case CallState::Disconnecting: return "Encerrando";
+    case CallState::Disconnected: return "Chamada encerrada";
+    case CallState::Error: return "Falha na chamada";
     }
     return "Desconhecido";
+}
+
+std::string_view callDirectionText(CallDirection direction) noexcept
+{
+    switch (direction) {
+    case CallDirection::None: return "Nenhuma";
+    case CallDirection::Incoming: return "Recebida";
+    case CallDirection::Outgoing: return "Originada";
+    }
+    return "Desconhecida";
 }
 
 std::string_view mediaStateText(MediaState state) noexcept

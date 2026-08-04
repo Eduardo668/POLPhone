@@ -39,6 +39,16 @@ std::string_view callStateName(CallState state) noexcept
     return "UNKNOWN";
 }
 
+std::string_view callDirectionName(CallDirection direction) noexcept
+{
+    switch (direction) {
+    case CallDirection::None: return "NONE";
+    case CallDirection::Incoming: return "INCOMING";
+    case CallDirection::Outgoing: return "OUTGOING";
+    }
+    return "UNKNOWN";
+}
+
 void AppState::updateRegistration(RegistrationSnapshot snapshot)
 {
     std::lock_guard<std::mutex> lock(mutex_);

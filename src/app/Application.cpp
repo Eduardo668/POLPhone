@@ -274,7 +274,12 @@ util::Result<void> Application::makeCall(std::string_view destination)
     std::unique_ptr<sip::SipCall> call;
     try {
         call = std::make_unique<sip::SipCall>(
-            *account_, calls_, state_, events_, logger_);
+            *account_,
+            calls_,
+            state_,
+            events_,
+            logger_,
+            CallDirection::Outgoing);
     } catch (const std::exception& error) {
         return util::Result<void>::failure(
             util::ErrorCode::Runtime,
@@ -300,8 +305,8 @@ util::Result<void> Application::makeCall(std::string_view destination)
 
 util::Result<void> Application::answerCall()
 {
-    sip::SipCall* call = calls_.current();
-    if (call == nullptr) {
+    auto call = calls_.acquireCurrent();
+    if (!call || call->direction() != CallDirection::Incoming) {
         return util::Result<void>::failure(
             util::ErrorCode::Runtime,
             "Não existe chamada ativa para atender.");
@@ -311,19 +316,19 @@ util::Result<void> Application::answerCall()
 
 util::Result<void> Application::rejectCall()
 {
-    sip::SipCall* call = calls_.current();
-    if (call == nullptr || state_.call().state != CallState::Incoming) {
+    auto call = calls_.acquireCurrent();
+    if (!call || call->direction() != CallDirection::Incoming) {
         return util::Result<void>::failure(
             util::ErrorCode::Runtime,
             "Não existe chamada recebida para rejeitar.");
     }
-    return call->answer(PJSIP_SC_DECLINE);
+    return call->answer(PJSIP_SC_BUSY_HERE);
 }
 
 util::Result<void> Application::hangupCall()
 {
-    sip::SipCall* call = calls_.current();
-    if (call == nullptr) {
+    auto call = calls_.acquireCurrent();
+    if (!call) {
         return util::Result<void>::failure(
             util::ErrorCode::Runtime,
             "Não existe chamada ativa para encerrar.");
@@ -333,8 +338,8 @@ util::Result<void> Application::hangupCall()
 
 util::Result<void> Application::setMuted(bool muted)
 {
-    sip::SipCall* call = calls_.current();
-    if (call == nullptr) {
+    auto call = calls_.acquireCurrent();
+    if (!call) {
         return util::Result<void>::failure(
             util::ErrorCode::Runtime,
             "Não existe chamada ativa para alterar o mudo.");
@@ -463,6 +468,51 @@ util::Result<void> Application::setDtmfVolumeDbm0(int volumeDbm0)
     return util::Result<void>::success();
 }
 
+util::Result<void> Application::applyDtmfSettings(
+    dtmf::DtmfMethod method,
+    int durationMs,
+    int gapMs,
+    int volumeDbm0)
+{
+    if (!initialized_ || dtmfSender_ == nullptr) {
+        return util::Result<void>::failure(
+            util::ErrorCode::Runtime,
+            "O serviço DTMF não está pronto; revise a inicialização.");
+    }
+    const auto old = dtmfSender_->settings();
+    if (old.defaultMethod == method
+        && old.durationMs == static_cast<unsigned>(durationMs)
+        && old.gapMs == static_cast<unsigned>(gapMs)
+        && old.volumeDbm0 == volumeDbm0) {
+        return util::Result<void>::success();
+    }
+    const auto applied = dtmfSender_->applyRuntimeSettings(
+        method, durationMs, gapMs, volumeDbm0);
+    if (!applied) return applied;
+
+    dtmfMethod_ = std::string(dtmf::methodName(method));
+    if (config_.has_value()) {
+        config_->dtmf.defaultMethod = dtmfMethod_;
+        config_->dtmf.durationMs = durationMs;
+        config_->dtmf.gapMs = gapMs;
+        config_->dtmf.volumeDbm0 = volumeDbm0;
+    }
+    static_cast<void>(logger_.info(
+        "dtmf",
+        "DTMF configuration changed: oldMethod="
+            + std::string(dtmf::methodName(old.defaultMethod))
+            + " newMethod=" + dtmfMethod_
+            + " duration=" + std::to_string(durationMs)
+            + " gap=" + std::to_string(gapMs)
+            + " volume=" + std::to_string(volumeDbm0)
+            + " appliedAtRuntime=true"));
+    static_cast<void>(events_.push(UiEvent{
+        UiEventSeverity::Info,
+        "dtmf",
+        "Configuração DTMF aplicada em tempo real: " + dtmfMethod_ + "."}));
+    return util::Result<void>::success();
+}
+
 util::Result<dtmf::DtmfResult> Application::sendDtmf(
     std::string_view digits,
     std::optional<dtmf::DtmfMethod> method,
@@ -482,12 +532,14 @@ util::Result<dtmf::DtmfResult> Application::sendDtmf(
             util::ErrorCode::InvalidArgument,
             "Duração e intervalo DTMF não podem ser negativos.");
     }
+    const auto effectiveMethod = method.value_or(settings.defaultMethod);
     return dtmfSender_->send(dtmf::DtmfRequest{
         std::string(digits),
-        method.value_or(settings.defaultMethod),
+        effectiveMethod,
         static_cast<unsigned>(duration),
         static_cast<unsigned>(gap),
-        settings.volumeDbm0});
+        settings.volumeDbm0,
+        settings.defaultMethod});
 }
 
 ApplicationStatus Application::status() const
@@ -502,18 +554,30 @@ ApplicationStatus Application::status() const
     if (config_.has_value()) snapshot.dtmf = config_->dtmf;
     if (dtmfSender_ != nullptr) {
         const auto settings = dtmfSender_->settings();
+        const auto lastSend = dtmfSender_->lastSend();
         snapshot.dtmf.defaultMethod = std::string(dtmf::methodName(settings.defaultMethod));
         snapshot.dtmf.durationMs = static_cast<int>(settings.durationMs);
         snapshot.dtmf.gapMs = static_cast<int>(settings.gapMs);
         snapshot.dtmf.volumeDbm0 = settings.volumeDbm0;
         snapshot.dtmfMethod = std::string(dtmf::methodName(settings.defaultMethod));
+        snapshot.lastDtmfMethod = lastSend.method;
+        snapshot.lastDtmfResult = lastSend.result;
     } else {
         snapshot.dtmfMethod = dtmfMethod_;
     }
     snapshot.consoleLogLevel = consoleLogLevel_;
-    if (sip::SipCall* call = calls_.current(); call != nullptr) {
+    snapshot.latestSipCode = snapshot.call.sipCode != 0
+        ? snapshot.call.sipCode : snapshot.registration.sipCode;
+    if (config_.has_value()) {
+        snapshot.registrarUri = config_->sip.registrarUri;
+        snapshot.transport = config_->network.transport;
+        snapshot.sipUsername = config_->sip.username;
+        snapshot.behavior = config_->behavior;
+    }
+    if (auto call = calls_.acquireCurrent()) {
         snapshot.mediaActive = call->hasActiveAudio();
         snapshot.muted = call->isMuted();
+        snapshot.callDiagnostics = call->diagnostics();
     }
     return snapshot;
 }
@@ -525,7 +589,12 @@ std::vector<UiEvent> Application::drainEvents()
 
 std::size_t Application::reapCalls() noexcept
 {
-    return calls_.reap();
+    const std::size_t reaped = calls_.reap();
+    if (reaped > 0U && !calls_.hasActiveCall()
+        && state_.call().state == CallState::Disconnected) {
+        state_.updateCall(CallSnapshot{});
+    }
+    return reaped;
 }
 
 void Application::shutdown() noexcept
@@ -536,8 +605,13 @@ void Application::shutdown() noexcept
     initialized_ = false;
     dtmfSender_.reset();
 
-    if (sip::SipCall* call = calls_.current(); call != nullptr) {
-        const auto hungUp = call->hangupCall();
+    bool hadCurrentCall = false;
+    {
+        auto call = calls_.acquireCurrent();
+        hadCurrentCall = static_cast<bool>(call);
+        const auto hungUp = call
+            ? call->hangupCall()
+            : util::Result<void>::success();
         if (!hungUp) {
             static_cast<void>(logger_.log(
                 logging::LogLevel::Warning,
@@ -545,10 +619,10 @@ void Application::shutdown() noexcept
                 hungUp.error().message,
                 hungUp.error().detail));
         }
-        if (!calls_.waitUntilIdle(shutdownTimeout)) {
-            static_cast<void>(logger_.warning(
-                "call", "Timeout de 3 s ao aguardar DISCONNECTED; aplicando hangup global."));
-        }
+    }
+    if (hadCurrentCall && !calls_.waitUntilIdle(shutdownTimeout)) {
+        static_cast<void>(logger_.warning(
+            "call", "Timeout de 3 s ao aguardar DISCONNECTED; aplicando hangup global."));
     }
     if (endpoint_ != nullptr && endpoint_->isStarted()) {
         const auto allHungUp = endpoint_->hangupAllCalls();
@@ -564,9 +638,7 @@ void Application::shutdown() noexcept
                 "call", "Timeout de 3 s após hangup global; prosseguindo com libDestroy."));
         }
     }
-    if (sip::SipCall* remaining = calls_.current(); remaining != nullptr) {
-        calls_.retire(remaining);
-    }
+    calls_.retireCurrent();
 
     if (account_ != nullptr) {
         const auto unregistered = account_->unregisterAndWait();

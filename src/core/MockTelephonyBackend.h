@@ -23,11 +23,11 @@ public:
     [[nodiscard]] util::Result<void> answerCall() override;
     [[nodiscard]] util::Result<void> rejectCall() override;
     [[nodiscard]] util::Result<void> hangupCall() override;
+    [[nodiscard]] util::Result<void> applyDtmfSettings(
+        const DtmfRuntimeSettings& settings) override;
     [[nodiscard]] util::Result<void> sendDtmf(
         std::string_view digits,
-        DtmfMethod method,
-        unsigned durationMs,
-        unsigned gapMs) override;
+        DtmfMethod method) override;
     [[nodiscard]] util::Result<void> setMuted(bool muted) override;
     [[nodiscard]] util::Result<std::vector<AudioDevice>> listAudioDevices() override;
     [[nodiscard]] util::Result<void> selectAudioDevice(
