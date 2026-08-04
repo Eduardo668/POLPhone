@@ -1,8 +1,10 @@
-# POLPhone — Arquitetura (MVP Console)
+# POLPhone — Arquitetura do motor e da CLI
 
 > Documento de arquitetura da prova técnica do POLPhone.
-> Escopo: aplicação **console**, **Windows x64**, **C++17**, **PJSIP/PJSUA2 2.17**, **somente áudio**.
-> Este documento **não** descreve código implementado — descreve o desenho a ser implementado.
+> Escopo original: aplicação **console**, **Windows x64**, **C++17**, **PJSIP/PJSUA2 2.17**,
+> **somente áudio**. A extensão gráfica e a separação implementada estão descritas em
+> [GUI-ARCHITECTURE.md](GUI-ARCHITECTURE.md); quando houver divergência sobre UI/fachada, o novo
+> documento prevalece.
 
 ---
 
@@ -54,9 +56,9 @@ Um executável de console capaz de:
 
 ### 1.4 Fora de escopo (MVP)
 
-Vídeo, TLS/SRTP, TCP, IPv6 como requisito, STUN/TURN/ICE, chamadas entrantes como funcionalidade
-(apenas tratamento mínimo educado), múltiplas contas, múltiplas chamadas simultâneas, GUI,
-instalador, auto-update, portabilidade para Linux/macOS.
+Vídeo, TLS/SRTP, TCP, IPv6 como requisito, STUN/TURN/ICE, múltiplas contas, múltiplas chamadas
+simultâneas, instalador, auto-update e portabilidade para Linux/macOS. A GUI e o tratamento de
+chamada recebida foram adicionados posteriormente conforme `GUI-ARCHITECTURE.md`.
 
 ---
 
@@ -72,7 +74,7 @@ instalador, auto-update, portabilidade para Linux/macOS.
                 │
 ┌───────────────▼──────────────────────────────────────────────────────────┐
 │  Camada de Aplicação  (src/app)                     [sem PJSIP]           │
-│  Application · ConsoleUi · CommandParser · AppState · EventBus            │
+│  Application · CommandParser · AppState · EventBus                         │
 └───────┬──────────────────┬───────────────────┬───────────────────────────┘
         │                  │                   │
 ┌───────▼────────┐ ┌───────▼────────┐ ┌────────▼──────────────────────────┐
@@ -163,12 +165,12 @@ Application
  ├─ owns  CallRegistry
  ├─ owns  AudioDeviceService
  ├─ owns  DtmfSender
- └─ owns  ConsoleUi
+ └─ não conhece ConsoleUi; a CLI a compõe externamente
 ```
 
 - `Result<void> initialize()` — carrega config, sobe logging, sobe endpoint, seleciona dispositivos,
   cria conta, dispara registro.
-- `int run()` — laço do console até `quit`/`Ctrl+C`.
+- O laço do console pertence ao executável CLI e recebe uma referência à `Application`.
 - `void shutdown()` — sequência de encerramento (seção 5.3). **Idempotente** e chamada por RAII.
 - É o único ponto que traduz comandos do usuário em ações sobre SIP/áudio/DTMF.
 - Mantém a *ordem de destruição* correta — este é o ponto mais crítico de estabilidade do MVP.

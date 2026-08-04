@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{C62C12EC-5CCB-4D78-B642-E1C810E89C14}</ProjectGuid>
+    <Keyword>Win32Proj</Keyword>
+    <RootNamespace>POLPhoneGui</RootNamespace>
+    <ProjectName>POLPhone</ProjectName>
+    <AppContainerApplication>false</AppContainerApplication>
+    <ApplicationType>Windows Store</ApplicationType>
+    <ApplicationTypeRevision>10.0</ApplicationTypeRevision>
+    <UseWinUI>true</UseWinUI>
+    <AppxPackage>false</AppxPackage>
+    <WindowsPackageType>None</WindowsPackageType>
+    <RuntimeIdentifier>win10-x64</RuntimeIdentifier>
+    <RuntimeIdentifiers>win10-x64</RuntimeIdentifiers>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <MinimumVisualStudioVersion>17.8</MinimumVisualStudioVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <PropertyGroup>
+    <TargetFramework>native</TargetFramework>
+    <TargetFrameworkIdentifier>native</TargetFrameworkIdentifier>
+    <TargetFrameworkVersion>v0.0</TargetFrameworkVersion>
+    <NuGetTargetMoniker>native,Version=v0.0</NuGetTargetMoniker>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <WebView2UseWinRT>true</WebView2UseWinRT>
+    <CppWinRTOptimized>true</CppWinRTOptimized>
+    <CppWinRTRootNamespaceAutoMerge>true</CppWinRTRootNamespaceAutoMerge>
+    <OutDir>$(ProjectDir)..\build\gui\$(Configuration)\</OutDir>
+    <IntDir>$(ProjectDir)..\build\gui\obj\$(Configuration)\</IntDir>
+    <TargetName>polphone</TargetName>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <WarningLevel>Level4</WarningLevel>
+      <ConformanceMode>true</ConformanceMode>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)..\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>WIN32_LEAN_AND_MEAN;NOMINMAX;UNICODE;_UNICODE;POLPHONE_CORE_SHARED_IMPORTS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalOptions>/utf-8 /EHsc /FS %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <Link>
+      <AppContainer>false</AppContainer>
+      <SubSystem>Windows</SubSystem>
+      <AdditionalLibraryDirectories>$(ProjectDir)..\build\$(Configuration);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>polphone_core_runtime.lib;shell32.lib;user32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClInclude Include="App.h" />
+    <ClInclude Include="..\src\core\CoreApi.h" />
+    <ClInclude Include="..\src\core\SettingsService.h" />
+    <ClInclude Include="MainWindow.h" />
+    <ClInclude Include="Theme.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="App.cpp" />
+    <ClCompile Include="MainWindow.cpp" />
+    <ClCompile Include="main.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.6.250205002" />
+    <PackageReference Include="Microsoft.Windows.CppWinRT" Version="2.0.240405.15" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <!--
+    The Windows App SDK 1.6 PRI lists NoiseAsset_256X256_PNG.png, while the
+    self-contained MSIX contains NoiseAsset_256x256_PNG.png. NTFS normally
+    hides that difference, but WSL UNC directories are case-sensitive.
+  -->
+  <Target Name="NormalizeWinAppSdkNoiseAssetCase"
+          BeforeTargets="_CopyOutOfDateSourceItemsToOutputDirectory">
+    <ItemGroup>
+      <_SourceItemsToCopyToOutputDirectory
+          Remove="@(_SourceItemsToCopyToOutputDirectory)"
+          Condition="'%(_SourceItemsToCopyToOutputDirectory.Filename)%(_SourceItemsToCopyToOutputDirectory.Extension)' == 'NoiseAsset_256X256_PNG.png'" />
+      <_SourceItemsToCopyToOutputDirectory Include="$(IntDir)MsixContent\Microsoft.UI.Xaml\Assets\NoiseAsset_256x256_PNG.png">
+        <TargetPath>Microsoft.UI.Xaml\Assets\NoiseAsset_256X256_PNG.png</TargetPath>
+      </_SourceItemsToCopyToOutputDirectory>
+      <_SourceItemsToCopyToOutputDirectory
+          Remove="@(_SourceItemsToCopyToOutputDirectory)"
+          Condition="'%(_SourceItemsToCopyToOutputDirectory.Filename)%(_SourceItemsToCopyToOutputDirectory.Extension)' == 'Microsoft.ui.xaml.dll'" />
+      <_SourceItemsToCopyToOutputDirectory Include="$(IntDir)MsixContent\Microsoft.ui.xaml.dll">
+        <TargetPath>Microsoft.UI.Xaml.dll</TargetPath>
+      </_SourceItemsToCopyToOutputDirectory>
+    </ItemGroup>
+  </Target>
+  <Target Name="CopyPOLPhoneCore" AfterTargets="Build">
+    <Error Condition="!Exists('$(ProjectDir)..\build\$(Configuration)\polphone_core_runtime.dll')"
+           Text="polphone_core_runtime.dll não encontrado. Compile primeiro o motor com scripts\build.ps1 -Config $(Configuration)." />
+    <Copy SourceFiles="$(ProjectDir)..\build\$(Configuration)\polphone_core_runtime.dll"
+          DestinationFolder="$(OutDir)" />
+  </Target>
+</Project>

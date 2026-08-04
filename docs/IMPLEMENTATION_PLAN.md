@@ -1,4 +1,4 @@
-# POLPhone — Plano de Implementação (MVP Console)
+# POLPhone — Plano de Implementação
 
 > Plano executável em etapas pequenas, sequenciais e verificáveis.
 > Cada etapa é uma unidade de trabalho fechada, com critério de conclusão objetivo e comando de
@@ -167,9 +167,9 @@ third_party/doctest/doctest.h   (vendorizado)
 ```powershell
 .\scripts\build.ps1 -Config Debug
 .\scripts\build.ps1 -Config Release
-.\build\Release\polphone.exe --version
-.\build\Release\polphone.exe --selftest ; $LASTEXITCODE      # 0
-dumpbin /headers .\build\Release\polphone.exe | Select-String "machine"   # x64
+.\build\Release\polphone_cli.exe --version
+.\build\Release\polphone_cli.exe --selftest ; $LASTEXITCODE      # 0
+dumpbin /headers .\build\Release\polphone_cli.exe | Select-String "machine"   # x64
 ```
 
 **Tarefa Codex:** *"Crie o CMakeLists.txt, CMakePresets.json, cmake/PJSIP.cmake, cmake/Warnings.cmake
@@ -244,7 +244,7 @@ ramal interno não mascarado, `Call-ID` preservado).
 **Comandos de validação:**
 ```powershell
 .\build\Debug\polphone_tests.exe -ts=redactor
-.\build\Debug\polphone.exe --selftest --log-level 5
+.\build\Debug\polphone_cli.exe --selftest --log-level 5
 Select-String -Path .\logs\*.log -Pattern "password|response=\"[a-f0-9]" # sem resultados
 ```
 
@@ -281,8 +281,8 @@ validação semântica separada; `redactedDump()`.
 **Comandos de validação:**
 ```powershell
 .\build\Debug\polphone_tests.exe -ts=config
-.\build\Debug\polphone.exe --config .\config\nao-existe.json ; $LASTEXITCODE   # 1
-.\build\Debug\polphone.exe --config .\config\polphone.config.json --selftest
+.\build\Debug\polphone_cli.exe --config .\config\nao-existe.json ; $LASTEXITCODE   # 1
+.\build\Debug\polphone_cli.exe --config .\config\polphone.config.json --selftest
 ```
 
 **Tarefa Codex:** *"Implemente AppConfig, ConfigLoader (nlohmann/json) e ConfigValidator conforme
@@ -319,10 +319,10 @@ local e lista de codecs, retorna 0, sem *assert* de heap ao sair.
 
 **Comandos de validação:**
 ```powershell
-.\build\Debug\polphone.exe --selftest --log-level 5 ; $LASTEXITCODE   # 0
+.\build\Debug\polphone_cli.exe --selftest --log-level 5 ; $LASTEXITCODE   # 0
 Select-String -Path .\logs\*.log -Pattern "transport|codec"
 # repetir 10x seguidas para detectar instabilidade de shutdown
-1..10 | % { .\build\Debug\polphone.exe --selftest | Out-Null; $LASTEXITCODE }
+1..10 | % { .\build\Debug\polphone_cli.exe --selftest | Out-Null; $LASTEXITCODE }
 ```
 
 **Tarefa Codex:** *"Implemente SipEndpoint (RAII sobre pj::Endpoint) e PjErrors, e o esqueleto de
@@ -353,7 +353,7 @@ nome do JSON funciona e é logada; nome inexistente gera erro claro e não fatal
 
 **Comandos de validação:**
 ```powershell
-.\build\Debug\polphone.exe --list-devices
+.\build\Debug\polphone_cli.exe --list-devices
 # alterar audio.captureDevice no JSON para um nome parcial e verificar no log a resolução
 ```
 
@@ -390,7 +390,7 @@ exibe timeout traduzido e mantém retry.
 
 **Comandos de validação:**
 ```powershell
-.\build\Debug\polphone.exe --config .\config\polphone.config.json
+.\build\Debug\polphone_cli.exe --config .\config\polphone.config.json
 # no console: status
 # testes negativos: senha errada no JSON; host inválido no JSON
 Select-String -Path .\logs\*.log -Pattern "REGISTER"
@@ -817,7 +817,7 @@ Meta: **100% das funções puras cobertas**. Nenhum teste unitário toca a rede,
 
 ### 3.2 Camada 2 — Teste de fumaça automatizável
 
-`polphone.exe --selftest` — sobe e derruba o PJSUA2 completo (endpoint, transporte, codecs) sem
+`polphone_cli.exe --selftest` — sobe e derruba o PJSUA2 completo (endpoint, transporte, codecs) sem
 registrar. Executado 10× em sequência detecta a maioria dos bugs de ciclo de vida.
 Executável em CI (Windows runner) porque não exige PABX nem dispositivo de áudio real
 (usar dispositivo nulo se necessário).
@@ -867,7 +867,7 @@ comparação de qualidade de áudio, e portabilidade.
 ### 3.6 CI (opcional, mas recomendado)
 
 Windows runner: `verify-env` → `setup-pjproject` (com cache do diretório `lib/`) → build Debug+Release
-→ `polphone_tests.exe` → `polphone.exe --selftest`. Sem PABX no CI.
+→ `polphone_tests.exe` → `polphone_cli.exe --selftest`. Sem PABX no CI.
 
 ---
 
@@ -925,7 +925,8 @@ Ordem de execução obrigatória. Cada item é uma tarefa fechada, entregue e va
 | **T15** | **DTMF in-band** — `ToneGenerator` (tonegen + conference bridge), aviso de codec incompatível, liberação correta de porta e pool. *Confirmar C3/C4/C5 antes de codificar* | E15 | T14 |
 | **T16** | `dtmfmode`/`dtmfcfg`, flags por requisição, serialização estrita e teste da invariante de não-duplicidade | E16 | T15 |
 | **T17** | Endurecimento: traduções de erro §9.3, encerramento §5.3 com timeouts, códigos de saída, auditoria de `noexcept` em todas as callbacks | E17 | T16 |
-| **T18** | `docs/FIELD-TEST-GUIDE.md` e `docs/TEST-MATRIX.md`; execução do roteiro de campo e registro da conclusão | E18 | T17 |
+| **T18** | `docs/FIELD-TEST-GUIDE.md` e `docs/TEST-MATRIX.md`; preparação do roteiro de campo; execução somente quando autorizada | E18 | T17 |
+| **T19** | Separação `polphone_core`/CLI, fachada assíncrona, backend mock, GUI WinUI 3, tema, scripts e testes de apresentação | E19 | T18 (motor concluído; ensaio real pode permanecer pendente) |
 
 ### Regras permanentes para o Codex
 
@@ -937,8 +938,30 @@ Ordem de execução obrigatória. Cada item é uma tarefa fechada, entregue e va
 4. **Nunca** implementar fallback automático entre métodos DTMF.
 5. **Nunca** fazer `delete this` em `SipCall`, nem destruir `Call`/`Account` dentro de callback.
 6. Toda callback do PJSUA2 é `noexcept` com `try/catch` para `pj::Error`, `std::exception` e `(...)`.
-7. Não adicionar dependências além de `pjproject`, `nlohmann/json` e `doctest`.
+7. Dependências adicionais da GUI são somente Windows App SDK e C++/WinRT, fixadas no projeto
+   MSBuild; o motor CMake conserva `pjproject`, `nlohmann/json` e `doctest`.
 8. Não implementar contatos, histórico, gravação, transferência, conferência, vídeo, presença,
-   mensagens, GUI, TLS/SRTP, múltiplas contas ou múltiplas chamadas simultâneas.
+   mensagens, TLS/SRTP, múltiplas contas ou múltiplas chamadas simultâneas.
 9. Toda mensagem ao usuário em **português**, com código do erro e ação sugerida.
 10. Uma etapa por commit; nenhuma etapa concluída sem o comando de validação executado.
+
+---
+
+## Etapa 19 — Núcleo reutilizável, WinUI 3 e modo de demonstração
+
+**Objetivo:** manter a CLI existente e oferecer uma GUI nativa que consome uma fachada de alto nível,
+com fluxo validável sem servidor SIP.
+
+**Entregas:**
+
+- `polphone_core`, `polphone_cli.exe` e `polphone.exe` separados;
+- `PolPhoneController`, `TelephonyBackend`, backend real e mock;
+- regras de apresentação testáveis sem janela;
+- interface de telefone, chamada recebida, teclado, DTMF/URA, configurações e diagnóstico;
+- tema branco/azul centralizado, com `#0a3b68` como cor principal;
+- scripts de restauração/build/execução e documentação WinUI;
+- testes de estados, comandos, temporização, falhas, sanitização e shutdown.
+
+**Critério de conclusão:** motor e testes Debug/Release aprovados; GUI Debug/Release compilada em
+máquina com `Microsoft.VisualStudio.ComponentGroup.WindowsAppDevelopment.VC.BuildTools`; `polphone.exe --demo`
+permanece responsivo e cobre os cenários simulados. Nenhum resultado de PABX/URA real é inferido.

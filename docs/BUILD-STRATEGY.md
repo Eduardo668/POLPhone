@@ -311,11 +311,12 @@ set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT p
 ```
 build/
 ├── POLPhone.sln
-├── Debug/   polphone.exe  polphone.pdb  polphone_tests.exe
-└── Release/ polphone.exe  polphone.pdb
+├── Debug/   polphone_cli.exe  polphone_core_runtime.dll  polphone_tests.exe
+├── Release/ polphone_cli.exe  polphone_core_runtime.dll  polphone_tests.exe
+└── gui/<Config>/ polphone.exe  (WinUI 3 unpackaged)
 ```
 
-O `polphone.exe` procura a configuração em `config/polphone.config.json` **relativo ao diretório
+O `polphone_cli.exe` procura a configuração em `config/polphone.config.json` **relativo ao diretório
 de trabalho**; `scripts/run.ps1` roda a partir da raiz do repositório e/ou aceita `--config <path>`.
 
 ---
@@ -397,10 +398,13 @@ código de saída ≠ 0 em falha.
 
 | Script | Responsabilidade |
 |---|---|
-| `verify-env.ps1` | Verifica VS2022 (via `vswhere`), toolset v143, Windows SDK, CMake ≥ 3.21, Git, e se `third_party/pjproject` está populado **e na tag 2.17**. Imprime um relatório e falha com instrução acionável. |
+| `verify-env.ps1` | Verifica VS2022 (via `vswhere`), toolset v143, Windows SDK, CMake ≥ 3.21, Git, e se `third_party/pjproject` está populado **e na tag 2.17**. Com `-Gui`, exige também as ferramentas WinUI C++. Imprime um relatório e falha com instrução acionável. |
 | `setup-pjproject.ps1` | `git submodule update --init --recursive`; confere que `HEAD` do submodule é a tag 2.17; copia `cmake/config_site.h.in` → `pjlib/include/pj/config_site.h`; roda MSBuild para os projetos de biblioteca requeridos em `Debug-Dynamic\|x64` e `Release-Dynamic\|x64`; valida a existência dos `.lib` esperados; imprime resumo. Aceita `-Clean` e `-Config <Debug\|Release\|Both>`. |
 | `build.ps1` | `cmake -S . -B build -G "Visual Studio 17 2022" -A x64` + `cmake --build build --config <cfg>`. Aceita `-Config`, `-Clean`, `-Tests`. |
-| `run.ps1` | Executa `build/<cfg>/polphone.exe` a partir da raiz, com `--config config/polphone.config.json`. Cria `logs/` se não existir. |
+| `run.ps1` | Executa `build/<cfg>/polphone_cli.exe` a partir da raiz, com `--config config/polphone.config.json`. Cria `logs/` se não existir. |
+| `build-gui.ps1` | Verifica o componente WinUI, restaura NuGet, compila core e `gui/POLPhone.Gui.vcxproj`. |
+| `run-demo.ps1` | Executa `build/gui/<cfg>/polphone.exe --demo`, sem configuração SIP real. |
+| `test.ps1` | Executa os testes Debug, Release ou ambos, inclusive quando o repositório está em UNC/WSL. |
 | `clean.ps1` | Remove `build/`, `logs/*.log` e, com `-All`, também os artefatos do pjproject (`lib/`, `bin/`, `obj/`). |
 
 Sequência para um clone novo:
@@ -456,11 +460,13 @@ Requisitos do módulo:
 | 13 | Build do pjproject falha aleatoriamente com `/m` | Paralelismo + dependências implícitas | Rodar sem `/m` na primeira vez, ou `/m:1` |
 | 14 | Build muito lento / arquivos "sumindo" | Windows Defender varrendo `obj/` e `lib/` | Exceção de pasta para o diretório do projeto |
 | 15 | `MSB8020: The build tools for v140 cannot be found` | Solução não retargetada | `/p:PlatformToolset=v143 /p:WindowsTargetPlatformVersion=10.0.22621.0` |
-| 16 | `polphone.exe` não inicia: "vcruntime140.dll não encontrado" | Falta VC++ Redistributable no destino | Instalar o Redistributable x64 ou migrar para `/MT` |
+| 16 | executável não inicia: "vcruntime140.dll não encontrado" | Falta VC++ Redistributable no destino | Instalar o Redistributable x64 ou migrar para `/MT` |
 | 17 | *Assert* do heap ao encerrar / travamento no `exit` | `libDestroy()` não chamado ou ordem de destruição errada | Ver ARCHITECTURE §5.3 |
 | 18 | `throw` dentro de callback → `std::terminate` | Exceção cruzando a fronteira C do PJSIP | `noexcept` + try/catch em toda callback |
 | 19 | `error LNK2001: unresolved external symbol "public: virtual ... pj::LogWriter"` | RTTI/exceções desabilitadas | Manter `/EHsc` e RTTI ligado |
 | 20 | Warnings viram erros e travam o build do pjproject | `/WX` herdado | Não usar `/WX` nos alvos do pjproject |
+| 21 | `mt.exe` falha ao interpretar manifesto em `\\wsl.localhost` | Linker gera caminho estendido UNC | `build-gui.ps1` usa `pushd` e unidade temporária |
+| 22 | `ExpandPriContent`/`Microsoft.Build.Packaging.Pri.Tasks.dll` ausente | Ferramentas WinUI não instaladas no VS | Instalar `Microsoft.VisualStudio.ComponentGroup.WindowsAppDevelopment.VC.BuildTools`; a detecção também aceita `Microsoft.AppxPackage.Targets` e a DLL PRI presentes |
 
 ---
 
@@ -473,10 +479,12 @@ Requisitos do módulo:
 | B3 | `setup-pjproject.ps1` gera as libs Debug **e** Release | `Get-ChildItem third_party\pjproject\lib\*.lib` |
 | B4 | `build.ps1 -Config Debug` compila sem erros | exit code 0 |
 | B5 | `build.ps1 -Config Release` compila sem erros | exit code 0 |
-| B6 | Binário é x64 | `dumpbin /headers build\Release\polphone.exe \| Select-String machine` |
-| B7 | `polphone.exe --version` imprime versão do app e do PJSIP | execução |
-| B8 | `polphone.exe --selftest` inicia e finaliza o PJSUA2 sem crash nem vazamento | exit code 0; log sem `FATAL` |
+| B6 | Binário CLI é x64 | `dumpbin /headers build\Release\polphone_cli.exe \| Select-String machine` |
+| B7 | `polphone_cli.exe --version` imprime versão do app e do PJSIP | execução |
+| B8 | `polphone_cli.exe --selftest` inicia e finaliza o PJSUA2 sem crash nem vazamento | exit code 0; log sem `FATAL` |
 | B9 | Nenhum arquivo do submodule modificado após o build | `git -C third_party/pjproject status --porcelain` vazio |
 | B10 | Repositório limpo após build (sem artefatos versionados) | `git status --porcelain` vazio |
 | B11 | Testes unitários passam | `build\Debug\polphone_tests.exe` |
 | B12 | Build reproduzível a partir de clone limpo | repetir a sequência da §6 em diretório novo |
+| B13 | GUI unpackaged compila em Debug e Release | `scripts\build-gui.ps1 -Config Both` |
+| B14 | Demo inicia sem configuração ou rede | `scripts\run-demo.ps1 -Config Debug` |

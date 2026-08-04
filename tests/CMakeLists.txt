@@ -3,6 +3,8 @@ add_executable(polphone_tests
     test_app_state.cpp
     test_audio_device_service.cpp
     test_command_parser.cpp
+    test_core_presentation.cpp
+    test_mock_backend.cpp
     test_config_loader.cpp
     test_config_validator.cpp
     test_dtmf_plan.cpp
@@ -19,10 +21,12 @@ target_link_libraries(polphone_tests PRIVATE
     polphone_app
     polphone_config
     polphone_dtmf
+    polphone_dtmf_plan
     polphone_logging
     polphone_pjsip_logging
     polphone_sip
     polphone_state
+    polphone_core
     PJSIP::pjsua2
     polphone_warnings
 )

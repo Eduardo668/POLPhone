@@ -1,5 +1,5 @@
 ﻿[CmdletBinding()]
-param()
+param([switch]$Gui)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
@@ -76,6 +76,37 @@ if ($isWindowsHost) {
 Write-Check "Visual Studio 2022" ($null -ne $vsInstallation) $(if ($vsInstallation) { $vsInstallation } else { "17.8+ com Desktop C++ não encontrado" })
 Write-Check "MSBuild" (($null -ne $msbuildPath) -and (Test-Path $msbuildPath -PathType Leaf)) $(if ($msbuildPath) { $msbuildPath } else { "não encontrado" })
 Write-Check "Toolset v143" $toolsetPassed $toolsetDetail
+
+$winUiToolsPassed = $false
+$winUiToolsDetail = "indisponível fora do Windows"
+if ($isWindowsHost -and $vsInstallation) {
+    $programFilesX86 = [Environment]::GetFolderPath("ProgramFilesX86")
+    $vswherePath = Join-Path $programFilesX86 "Microsoft Visual Studio\Installer\vswhere.exe"
+    $winUiComponentId = "Microsoft.VisualStudio.ComponentGroup.WindowsAppDevelopment.VC.BuildTools"
+    $winUiInstallation = (& $vswherePath -latest -products * -version "[17.8,18.0)" `
+        -requires $winUiComponentId `
+        -property installationPath | Select-Object -First 1)
+    $appxPackageRoot = Join-Path $vsInstallation "MSBuild\Microsoft\VisualStudio\v17.0\AppxPackage"
+    $appxTargets = Join-Path $appxPackageRoot "Microsoft.AppxPackage.Targets"
+    $priTasks = Join-Path $appxPackageRoot "Microsoft.Build.Packaging.Pri.Tasks.dll"
+    $winUiArtifactsPresent = (Test-Path $appxTargets -PathType Leaf) `
+        -and (Test-Path $priTasks -PathType Leaf)
+    $winUiToolsPassed = ($null -ne $winUiInstallation) -or $winUiArtifactsPresent
+    $winUiToolsDetail = if ($null -ne $winUiInstallation) {
+        "componente $winUiComponentId confirmado pelo vswhere"
+    } elseif ($winUiArtifactsPresent) {
+        "componente confirmado pelos artefatos Microsoft.AppxPackage.Targets e Microsoft.Build.Packaging.Pri.Tasks.dll"
+    } else {
+        "instale o componente $winUiComponentId; ausentes: $appxTargets e/ou $priTasks"
+    }
+}
+if ($Gui) {
+    Write-Check "WinUI 3 C++" $winUiToolsPassed $winUiToolsDetail
+} else {
+    $winUiLabel = if ($winUiToolsPassed) { "OK" } else { "INFO" }
+    Write-Host ("[{0,-5}] WinUI 3 C++: {1} (use -Gui para tornar obrigatório)" -f `
+        $winUiLabel, $winUiToolsDetail)
+}
 
 $cmakePath = $null
 $cmakeCommand = Get-Command cmake -ErrorAction SilentlyContinue

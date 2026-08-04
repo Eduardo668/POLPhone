@@ -27,8 +27,8 @@ config/*.local.json
 *.log
 *.dmp
 *.mdmp
-core
-core.*
+/core
+/core.*
 *.pcap
 *.pcapng
 *.cap
@@ -49,6 +49,8 @@ compile_commands.json
 
 # Visual Studio e MSBuild
 .vs/
+**/obj/
+/gui/Generated Files/
 *.user
 *.suo
 *.VC.db
